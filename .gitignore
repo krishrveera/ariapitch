@@ -1,2 +1,6 @@
 voicesignal/
 VoiceSignal.jsx
+adult/
+pediatric/
+.env
+venv/
