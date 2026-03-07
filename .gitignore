@@ -1,2 +1,4 @@
 b2ai-pediatric
 b2ai-voice
+node_modules/
+.venv/
