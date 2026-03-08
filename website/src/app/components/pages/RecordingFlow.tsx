@@ -3,18 +3,23 @@ import { useNavigate } from "react-router";
 import { useAppContext } from "../../AppContext";
 import { motion, AnimatePresence } from "motion/react";
 import { Mic, CheckCircle2, XCircle, AlertTriangle, Play, Square, Activity } from "lucide-react";
+import { analyzeAudio, extractBiomarkers, generateMessage } from "../../services/api";
 import { LiveWaveform } from "../ui/LiveWaveform";
 
-type FlowState = "PREPARING" | "COUNTDOWN" | "RECORDING" | "ANALYZING" | "RESULT";
+type FlowState = "PREPARING" | "INITIAL_DELAY" | "SILENCE_COUNTDOWN" | "SILENCE_RECORDING" | "RECORDING" | "ANALYZING" | "RESULT";
 
 const PROMPTS = [
   {
     type: "Vowel",
-    text: "Ahhhhhhhhhh",
+    text: "1, 2, 3 aah",
+    instruction: "Repeat '1, 2, 3 aah' in your normal voice and hold the sound 'aah' for as long as you can",
+    recordingDuration: 10, // seconds - sustained vowel
   },
   {
     type: "Reading",
-    text: "The quick brown fox jumps over the lazy dog.",
+    text: "Do you like amusement parks? Well, I sure do. To amuse myself, I went twice last spring. My most MEMORABLE moment was riding on the Caterpillar, which is a gigantic rollercoaster high above the ground. When I saw how high the Caterpillar rose into the bright blue sky I knew it was for me. After waiting in line for thirty minutes, I made it to the front where the man measured my height to see if I was tall enough. I gave the man my coins, asked for change, and jumped on the cart. Tick, tick, tick, the Caterpillar climbed slowly up the tracks. It went SO high I could see the parking lot. Boy was I SCARED! I thought to myself, \"There's no turning back now.\" People were so scared they screamed as we swiftly zoomed fast, fast, and faster along the tracks. As quickly as it started, the Caterpillar came to a stop. Unfortunately, it was time to pack the car and drive home. That night I dreamt of the wild ride on the Caterpillar. Taking a trip to the amusement park and riding on the Caterpillar was my MOST memorable moment ever!",
+    instruction: "Read the Caterpillar Passage out loud in your typical voice",
+    recordingDuration: 110, // seconds - 1:50 as per protocol
   }
 ];
 
@@ -22,11 +27,14 @@ export function RecordingFlow() {
   const { userData, setUserData } = useAppContext();
   const navigate = useNavigate();
   const [flowState, setFlowState] = useState<FlowState>("PREPARING");
-  const [countdown, setCountdown] = useState(3);
+  const [countdown, setCountdown] = useState(2); // Initial delay countdown
+  const [silenceCountdown, setSilenceCountdown] = useState(3); // 3 seconds of silence
   const [recordingTime, setRecordingTime] = useState(0);
   const [currentPrompt, setCurrentPrompt] = useState(PROMPTS[1]);
   const [activeWordIndex, setActiveWordIndex] = useState(0);
   const [isSuccess, setIsSuccess] = useState(true);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   // Audio refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -77,19 +85,25 @@ export function RecordingFlow() {
       source.connect(analyser);
       analyserRef.current = analyser;
 
-      // Record the audio for later use
+      // Don't start recording yet - we'll do that after silence period
       const mediaRecorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      mediaRecorder.start();
       mediaRecorderRef.current = mediaRecorder;
 
       return true;
     } catch (err) {
       console.error("Microphone access denied:", err);
       return false;
+    }
+  };
+
+  const startRecording = () => {
+    const mediaRecorder = mediaRecorderRef.current;
+    if (mediaRecorder && mediaRecorder.state === "inactive") {
+      chunksRef.current = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      mediaRecorder.start();
     }
   };
 
@@ -104,6 +118,10 @@ export function RecordingFlow() {
       mediaRecorder.onstop = async () => {
         try {
           const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+
+          // Save blob for API call
+          setAudioBlob(blob);
+
           const arrayBuffer = await blob.arrayBuffer();
 
           // Decode audio data to get raw samples
@@ -121,6 +139,7 @@ export function RecordingFlow() {
           await audioCtx.close();
         } catch (err) {
           console.error("Error processing audio:", err);
+          setAnalysisError("Failed to process audio recording");
         }
         resolve();
       };
@@ -134,50 +153,136 @@ export function RecordingFlow() {
     });
   };
 
-  // Countdown Logic
+  // Initial Delay Logic - Give user time to understand what's happening
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (flowState === "COUNTDOWN") {
+    if (flowState === "INITIAL_DELAY") {
       if (countdown > 0) {
         timer = setTimeout(() => setCountdown(c => c - 1), 1000);
       } else {
-        setFlowState("RECORDING");
+        setFlowState("SILENCE_COUNTDOWN");
+        setSilenceCountdown(3); // Reset silence countdown
       }
     }
     return () => clearTimeout(timer);
   }, [countdown, flowState]);
 
-  // Recording Timer
+  // Silence Countdown Logic
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (flowState === "RECORDING") {
-      timer = setTimeout(() => setRecordingTime(t => t + 1), 1000);
+    if (flowState === "SILENCE_COUNTDOWN") {
+      if (silenceCountdown > 0) {
+        timer = setTimeout(() => setSilenceCountdown(c => c - 1), 1000);
+      } else {
+        setFlowState("SILENCE_RECORDING");
+        setRecordingTime(0);
+      }
+    }
+    return () => clearTimeout(timer);
+  }, [silenceCountdown, flowState]);
+
+  // Silence Recording Timer - 3 seconds of silence
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (flowState === "SILENCE_RECORDING") {
+      if (recordingTime < 3) {
+        timer = setTimeout(() => setRecordingTime(t => t + 1), 1000);
+      } else {
+        setFlowState("RECORDING");
+        setRecordingTime(0); // Reset for actual recording
+      }
     }
     return () => clearTimeout(timer);
   }, [recordingTime, flowState]);
 
-  // Analyzing Logic
+  // Start actual recording when entering RECORDING state
   useEffect(() => {
-    if (flowState === "ANALYZING") {
-      const success = Math.random() > 0.2;
-      setIsSuccess(success);
-      setTimeout(() => {
-        setFlowState("RESULT");
-      }, 3000);
+    if (flowState === "RECORDING") {
+      startRecording();
     }
   }, [flowState]);
 
+  // Recording Timer - Auto-stop after duration
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (flowState === "RECORDING") {
+      if (recordingTime < currentPrompt.recordingDuration) {
+        timer = setTimeout(() => setRecordingTime(t => t + 1), 1000);
+      } else {
+        // Auto-stop recording when time is up
+        handleStopRecording();
+      }
+    }
+    return () => clearTimeout(timer);
+  }, [recordingTime, flowState, currentPrompt]);
+
+  // Analyzing Logic - Call real API
+  useEffect(() => {
+    if (flowState === "ANALYZING" && audioBlob) {
+      const runAnalysis = async () => {
+        try {
+          setAnalysisError(null);
+
+          // Determine task type based on prompt
+          const taskType = currentPrompt.type === "Vowel" ? "sustained_vowel" : "reading_passage";
+
+          // Call the backend API
+          const result = await analyzeAudio(audioBlob, {
+            deviceId: 'web_app',
+            taskType,
+            silenceDuration: 0.5,
+          });
+
+          if (result.success && result.data) {
+            // Analysis successful
+            setIsSuccess(true);
+
+            // Extract biomarkers from features
+            const biomarkers = extractBiomarkers(result.data.features);
+
+            // Generate user-friendly message
+            const { message, isAnomaly } = generateMessage(
+              result.data.predictions,
+              result.data.explanation
+            );
+
+            // Store results temporarily for finishRecording
+            (window as any).__analysisResult = {
+              biomarkers,
+              message,
+              isAnomaly,
+              predictions: result.data.predictions,
+            };
+          } else {
+            // Analysis failed - quality gate or error
+            setIsSuccess(false);
+            setAnalysisError(result.error?.message || "Analysis failed");
+          }
+        } catch (error) {
+          console.error("Analysis error:", error);
+          setIsSuccess(false);
+          setAnalysisError("Failed to analyze recording");
+        } finally {
+          setFlowState("RESULT");
+        }
+      };
+
+      runAnalysis();
+    }
+  }, [flowState, audioBlob, currentPrompt]);
+
   const handleStart = async () => {
-    setCountdown(3);
+    setCountdown(2);
+    setSilenceCountdown(3);
     setRecordingTime(0);
     setActiveWordIndex(0);
 
     const ok = await startAudioCapture();
     if (ok) {
-      setFlowState("COUNTDOWN");
+      setFlowState("INITIAL_DELAY");
     } else {
       // Fallback: proceed without audio if mic is denied
-      setFlowState("COUNTDOWN");
+      setFlowState("INITIAL_DELAY");
     }
   };
 
@@ -189,18 +294,40 @@ export function RecordingFlow() {
 
   const finishRecording = () => {
     if (isSuccess) {
-      // Generate dummy metrics
-      const pitch = Math.round(200 + Math.random() * 20);
-      const shimmer = Number((3 + Math.random() * 1.5).toFixed(1));
-      const jitter = Number((1 + Math.random() * 1).toFixed(1));
-      const isAnomaly = Math.random() > 0.7;
+      // Get analysis results from window (set in analyzing effect)
+      const analysisResult = (window as any).__analysisResult;
+
+      let pitch, shimmer, jitter, message, isAnomaly, spectralCentroid, harmonicRatio;
+
+      if (analysisResult) {
+        // Use real analysis results
+        pitch = analysisResult.biomarkers.pitch;
+        shimmer = analysisResult.biomarkers.shimmer;
+        jitter = analysisResult.biomarkers.jitter;
+        spectralCentroid = analysisResult.biomarkers.spectralCentroid;
+        harmonicRatio = analysisResult.biomarkers.harmonicRatio;
+        message = analysisResult.message;
+        isAnomaly = analysisResult.isAnomaly;
+
+        // Clean up
+        delete (window as any).__analysisResult;
+      } else {
+        // Fallback to dummy data if analysis failed
+        pitch = Math.round(200 + Math.random() * 20);
+        shimmer = Number((3 + Math.random() * 1.5).toFixed(1));
+        jitter = Number((1 + Math.random() * 1).toFixed(1));
+        spectralCentroid = Math.round(1500 + Math.random() * 500);
+        harmonicRatio = Number((15 + Math.random() * 8).toFixed(1));
+        message = "Your voice exhibits slight jitter today, but pitch is stable. Stay hydrated!";
+        isAnomaly = false;
+      }
 
       const newEntry = {
         date: new Date().toLocaleDateString('en-US', { weekday: 'short' }),
         pitch,
         shimmer,
         jitter,
-        message: "Your voice exhibits slight jitter today, but pitch is stable. Stay hydrated!",
+        message,
         isAnomaly,
       };
 
@@ -219,11 +346,11 @@ export function RecordingFlow() {
           pitch,
           shimmer,
           jitter,
-          message: newEntry.message,
+          message,
           isAnomaly,
           duration: recordingTime,
-          spectralCentroid: Math.round(1500 + Math.random() * 500),
-          harmonicRatio: Number((15 + Math.random() * 8).toFixed(1)),
+          spectralCentroid,
+          harmonicRatio,
           formants: [
             Math.round(700 + Math.random() * 100),
             Math.round(1200 + Math.random() * 200),
@@ -252,7 +379,9 @@ export function RecordingFlow() {
         </button>
         <span className="text-sm font-medium tracking-wide text-neutral-400 uppercase">
           {flowState === "PREPARING" && "Get Ready"}
-          {flowState === "COUNTDOWN" && "Starting soon"}
+          {flowState === "INITIAL_DELAY" && "Get Ready"}
+          {flowState === "SILENCE_COUNTDOWN" && "Prepare for Silence"}
+          {flowState === "SILENCE_RECORDING" && "Recording Silence"}
           {flowState === "RECORDING" && "Recording"}
           {flowState === "ANALYZING" && "Analyzing"}
           {flowState === "RESULT" && "Done"}
@@ -277,7 +406,7 @@ export function RecordingFlow() {
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold mb-2">Daily Voice Check</h2>
                 <p className="text-neutral-400 max-w-xs mx-auto text-sm leading-relaxed">
-                  Find a quiet place. We will record you holding a sustained vowel or reading a short passage.
+                  Find a quiet place. First, we'll record 3 seconds of silence to calibrate, then you'll complete a voice task.
                 </p>
               </div>
 
@@ -286,8 +415,8 @@ export function RecordingFlow() {
                   <Play className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-white">Prompt: {currentPrompt.type}</h3>
-                  <p className="text-xs text-neutral-400 mt-1 line-clamp-2">"{currentPrompt.text}"</p>
+                  <h3 className="text-sm font-semibold text-white">Task: {currentPrompt.type}</h3>
+                  <p className="text-xs text-neutral-400 mt-1">{currentPrompt.instruction}</p>
                 </div>
               </div>
 
@@ -300,15 +429,70 @@ export function RecordingFlow() {
             </motion.div>
           )}
 
-          {flowState === "COUNTDOWN" && (
+          {flowState === "INITIAL_DELAY" && (
             <motion.div
-              key="countdown"
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.5, opacity: 0 }}
-              className="text-[120px] font-black text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.3)] tabular-nums"
+              key="initial-delay"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
             >
-              {countdown}
+              <div className="text-[120px] font-black text-indigo-400 drop-shadow-[0_0_30px_rgba(99,102,241,0.5)] tabular-nums">
+                {countdown}
+              </div>
+              <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-2xl p-6 w-full">
+                <p className="text-neutral-300 text-lg font-medium">
+                  Get ready to be quiet for 3 seconds
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {flowState === "SILENCE_COUNTDOWN" && (
+            <motion.div
+              key="silence-countdown"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
+            >
+              <div className="text-[120px] font-black text-amber-400 drop-shadow-[0_0_30px_rgba(251,191,36,0.5)] tabular-nums">
+                {silenceCountdown}
+              </div>
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 w-full">
+                <p className="text-amber-200 text-xl font-bold mb-2">Please be quiet!</p>
+                <p className="text-neutral-400 text-sm">
+                  Recording {silenceCountdown} seconds of silence for calibration
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {flowState === "SILENCE_RECORDING" && (
+            <motion.div
+              key="silence-recording"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
+            >
+              <div className="w-32 h-32 bg-amber-500/10 rounded-full flex items-center justify-center border-4 border-amber-500/30 relative">
+                <motion.div
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                  className="absolute inset-0 bg-amber-500/20 rounded-full"
+                />
+                <Mic className="w-12 h-12 text-amber-400" />
+              </div>
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-6 w-full">
+                <p className="text-amber-200 text-xl font-bold mb-2">🤫 Shh... Stay quiet</p>
+                <p className="text-neutral-400 text-sm">
+                  Calibrating with silence: {recordingTime}/3 seconds
+                </p>
+                <p className="text-neutral-500 text-xs mt-2">
+                  Your task will begin after this
+                </p>
+              </div>
             </motion.div>
           )}
 
@@ -335,21 +519,28 @@ export function RecordingFlow() {
               <div className="text-center space-y-2">
                 <div className="text-4xl sm:text-5xl font-black text-white tabular-nums">
                   {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                  <span className="text-2xl text-neutral-500"> / {Math.floor(currentPrompt.recordingDuration / 60)}:{(currentPrompt.recordingDuration % 60).toString().padStart(2, '0')}</span>
                 </div>
                 <p className="text-sm text-neutral-400">Recording in progress</p>
+                <div className="w-full bg-neutral-800 rounded-full h-2 mt-3">
+                  <div
+                    className="bg-indigo-500 h-2 rounded-full transition-all duration-1000"
+                    style={{ width: `${(recordingTime / currentPrompt.recordingDuration) * 100}%` }}
+                  />
+                </div>
               </div>
 
               {/* Prompt Text */}
-              <div className="w-full bg-neutral-900 border border-neutral-800 rounded-3xl p-4 sm:p-6 text-center shadow-inner">
+              <div className="w-full bg-neutral-900 border border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-inner max-h-[40vh] overflow-y-auto">
                 {currentPrompt.type === "Reading" ? (
-                  <div className="text-lg sm:text-xl font-medium leading-relaxed text-white">
+                  <div className="text-base sm:text-lg font-medium leading-relaxed text-white text-left">
                     {currentPrompt.text}
                   </div>
                 ) : (
                   <motion.div
                     animate={{ scale: [1, 1.05, 1] }}
                     transition={{ repeat: Infinity, duration: 2 }}
-                    className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-indigo-400"
+                    className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-indigo-400 text-center"
                   >
                     {currentPrompt.text}
                   </motion.div>
@@ -422,8 +613,10 @@ export function RecordingFlow() {
                     </motion.div>
                   </div>
                   <div className="text-center space-y-2">
-                    <h2 className="text-2xl sm:text-3xl font-bold text-white">Too Much Noise</h2>
-                    <p className="text-sm sm:text-base text-neutral-400">We couldn't isolate your voice clearly.</p>
+                    <h2 className="text-2xl sm:text-3xl font-bold text-white">Analysis Failed</h2>
+                    <p className="text-sm sm:text-base text-neutral-400">
+                      {analysisError || "We couldn't isolate your voice clearly."}
+                    </p>
                   </div>
                 </>
               )}

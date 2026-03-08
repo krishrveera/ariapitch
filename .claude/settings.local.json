@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./venv/bin/python -c \"\nfrom dotenv import load_dotenv\nload_dotenv()\n\nimport sys\nsys.path.insert(0, ''/Users/jaydenl/Dev/Hackathon/cornellhealthhack/server'')\n\nfrom google import genai\nimport os\n\nclient = genai.Client(api_key=os.environ.get(''GOOGLE_API_KEY''))\n\nprompt = ''''''Your voice has jitter of 1.85% and shimmer of 4.23%. Return JSON: \n{\n  \"\"summary\"\": \"\"Explain these measurements in 1-2 sentences\"\",\n  \"\"details\"\": \"\"Explain in detail what these measurements mean\"\"\n}''''''\n\nresponse = client.models.generate_content(\n    model=''models/gemini-2.5-flash'',\n    contents=prompt,\n    config={\n        ''max_output_tokens'': 1000,\n        ''temperature'': 0.7,\n        ''response_mime_type'': ''application/json''\n    }\n)\n\nprint(''Finish reason:'', response.candidates[0].finish_reason if response.candidates else ''None'')\nprint(''Text length:'', len(response.text))\nprint(''Text:'', response.text)\n\")"
+      "Bash(curl -L \"https://raw.githubusercontent.com/eipm/bridge2ai-redcap/main/docs/adults/Voice%20Disorders%20Protocol.md\")",
+      "Bash(curl -L \"https://raw.githubusercontent.com/eipm/bridge2ai-redcap/main/docs/adults/Acoustic%20Tasks/Prolonged%20Vowel/Prolonged%20Vowel%20-%20Acoustic%20Task%20Description%20(English).md\")"
     ],
     "deny": [],
     "ask": []

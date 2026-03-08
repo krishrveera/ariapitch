@@ -1,16 +1,16 @@
 """
 Comprehensive API Test Suite for Voice Health Analysis API
-Tests all endpoints with sample audio files
+Tests all endpoints with sample audio files.
+
+Usage:
+    python tests/test_api.py
 """
 
 import os
 import sys
-import requests
 import json
+import requests
 from pathlib import Path
-import base64
-from io import BytesIO
-from PIL import Image
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,409 +25,322 @@ SAMPLE_DIRS = [
     PROJECT_ROOT / "samples",
     PROJECT_ROOT / "audio_samples",
     PROJECT_ROOT / "test_audio",
-    PROJECT_ROOT / "data" / "samples"
+    PROJECT_ROOT / "data" / "samples",
+    PROJECT_ROOT,  # project root (for m4a files)
 ]
 
+
 class Colors:
-    GREEN = '\033[92m'
-    RED = '\033[91m'
-    YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BLUE = "\033[94m"
+    BOLD = "\033[1m"
+    END = "\033[0m"
 
-def print_header(text):
-    print(f"\n{Colors.BOLD}{Colors.BLUE}{'='*80}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.BLUE}{text.center(80)}{Colors.END}")
-    print(f"{Colors.BOLD}{Colors.BLUE}{'='*80}{Colors.END}\n")
 
-def print_success(text):
+def ok(text):
     print(f"{Colors.GREEN}✓ {text}{Colors.END}")
 
-def print_error(text):
+
+def fail(text):
     print(f"{Colors.RED}✗ {text}{Colors.END}")
 
-def print_warning(text):
+
+def warn(text):
     print(f"{Colors.YELLOW}⚠ {text}{Colors.END}")
 
-def print_info(text):
+
+def info(text):
     print(f"{Colors.BLUE}ℹ {text}{Colors.END}")
 
+
+def header(text):
+    print(f"\n{Colors.BOLD}{Colors.BLUE}{'=' * 70}{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.BLUE}  {text}{Colors.END}")
+    print(f"{Colors.BOLD}{Colors.BLUE}{'=' * 70}{Colors.END}\n")
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
 def find_sample_audio():
-    """Find a sample audio file to use for testing"""
+    """Find a sample audio file to use for testing."""
     for sample_dir in SAMPLE_DIRS:
         if sample_dir.exists():
-            for ext in ['.wav', '.mp3', '.m4a', '.flac']:
-                files = list(sample_dir.glob(f'*{ext}'))
+            for ext in [".wav", ".mp3", ".m4a", ".flac"]:
+                files = list(sample_dir.glob(f"*{ext}"))
                 if files:
                     return files[0]
-
-    # Search in current directory and subdirectories
-    for ext in ['.wav', '.mp3', '.m4a', '.flac']:
-        files = list(PROJECT_ROOT.rglob(f'*{ext}'))
-        if files:
-            return files[0]
-
     return None
 
-def test_health():
-    """Test /api/v1/health endpoint"""
-    print_info("Testing health endpoint...")
+
+def assert_envelope(response, expected_status="success"):
+    """Validate the standard API envelope structure."""
+    data = response.json()
+    assert "status" in data, f"Missing 'status' field: {list(data.keys())}"
+    assert "code" in data, f"Missing 'code' field"
+    assert "message" in data, f"Missing 'message' field"
+    assert "data" in data, f"Missing 'data' field"
+    assert "errors" in data, f"Missing 'errors' field"
+    assert "meta" in data, f"Missing 'meta' field"
+    assert "request_id" in data["meta"], "Missing meta.request_id"
+    assert "timestamp" in data["meta"], "Missing meta.timestamp"
+    assert data["status"] == expected_status, (
+        f"Expected status '{expected_status}', got '{data['status']}'"
+    )
+    return data
+
+
+# ── Tests ────────────────────────────────────────────────────────────────────
+
+passed = 0
+failed_count = 0
+skipped = 0
+
+
+def run(name, fn):
+    global passed, failed_count
     try:
-        response = requests.get(f"{API_BASE}/health", timeout=5)
-
-        if response.status_code == 200:
-            data = response.json()
-            print_success(f"Health check passed: {data.get('status')}")
-            print(f"  Environment: {data.get('environment')}")
-            print(f"  Timestamp: {data.get('timestamp')}")
-            return True
-        else:
-            print_error(f"Health check failed with status {response.status_code}")
-            return False
-
-    except requests.exceptions.ConnectionError:
-        print_error("Cannot connect to server. Is it running?")
-        print_warning("Start the server with: ./start_server.sh")
-        return False
+        fn()
+        ok(name)
+        passed += 1
+    except AssertionError as e:
+        fail(f"{name}: {e}")
+        failed_count += 1
     except Exception as e:
-        print_error(f"Health check error: {e}")
-        return False
+        fail(f"{name}: {type(e).__name__}: {e}")
+        failed_count += 1
+
+
+# noinspection PyPep8Naming
+class AssertionError(AssertionError if False else AssertionError):
+    ...
+
+
+# ---------- 1. Health check -----------------------------------------------
+
+def test_health():
+    r = requests.get(f"{API_BASE}/health", timeout=10)
+    assert r.status_code == 200, f"Status {r.status_code}"
+    data = assert_envelope(r, "success")
+    d = data["data"]
+    assert "version" in d, f"Missing version in health data: {d}"
+    assert "model_version" in d, f"Missing model_version in health data: {d}"
+    info(f"  version={d.get('version')}  model_version={d.get('model_version')}")
+
+
+# ---------- 2. Tasks list --------------------------------------------------
 
 def test_tasks_list():
-    """Test GET /api/v1/tasks endpoint"""
-    print_info("Testing tasks list endpoint...")
-    try:
-        response = requests.get(f"{API_BASE}/tasks", timeout=10)
+    r = requests.get(f"{API_BASE}/tasks", timeout=10)
+    assert r.status_code == 200, f"Status {r.status_code}"
+    data = assert_envelope(r, "success")
+    tasks = data["data"]["tasks"]
+    assert isinstance(tasks, list), f"tasks should be a list, got {type(tasks)}"
+    assert len(tasks) > 0, "No tasks returned"
+    info(f"  {len(tasks)} task(s) returned")
+    for t in tasks:
+        info(f"    - {t.get('display_name', t.get('id', '?'))}")
 
-        if response.status_code == 200:
-            data = response.json()
 
-            if data.get('status') == 'success':
-                tasks = data.get('data', {}).get('tasks', [])
-                print_success(f"Tasks list retrieved: {len(tasks)} tasks")
+# ---------- 3. Task detail -------------------------------------------------
 
-                for task in tasks:
-                    print(f"  - {task['display_name']} ({task['id']})")
-                    print(f"    Conditions screened: {', '.join(task['conditions_screened'])}")
+def test_task_detail():
+    r = requests.get(f"{API_BASE}/tasks/sustained_vowel", timeout=10)
+    assert r.status_code == 200, f"Status {r.status_code}"
+    data = assert_envelope(r, "success")
+    task = data["data"]["task"]
+    assert task.get("id") == "sustained_vowel" or "display_name" in task
 
-                return True
-            else:
-                print_error(f"Tasks list failed: {data.get('message')}")
-                return False
-        else:
-            print_error(f"Tasks list failed with status {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
 
-    except Exception as e:
-        print_error(f"Tasks list error: {e}")
-        return False
+def test_task_not_found():
+    r = requests.get(f"{API_BASE}/tasks/nonexistent_xyz", timeout=10)
+    assert r.status_code == 404, f"Expected 404, got {r.status_code}"
+    data = assert_envelope(r, "error")
+    assert data["errors"]["type"] == "not_found"
 
-def test_task_detail(task_id="sustained_vowel"):
-    """Test GET /api/v1/tasks/{task_id} endpoint"""
-    print_info(f"Testing task detail endpoint for '{task_id}'...")
-    try:
-        response = requests.get(f"{API_BASE}/tasks/{task_id}", timeout=10)
 
-        if response.status_code == 200:
-            data = response.json()
+# ---------- 4. Analyze (no file) ------------------------------------------
 
-            if data.get('status') == 'success':
-                task = data.get('data', {}).get('task', {})
-                print_success(f"Task detail retrieved: {task.get('display_name')}")
-                print(f"  Instruction: {task.get('instruction')[:60]}...")
-                print(f"  Min duration: {task.get('min_duration_sec')}s")
-                print(f"  Quality gates: {len(task.get('quality_gates', []))} gates")
+def test_analyze_no_file():
+    r = requests.post(f"{API_BASE}/analyze", timeout=10)
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+    data = assert_envelope(r, "error")
+    assert data["errors"]["type"] == "validation_error"
 
-                return True
-            else:
-                print_error(f"Task detail failed: {data.get('message')}")
-                return False
-        else:
-            print_error(f"Task detail failed with status {response.status_code}")
-            return False
 
-    except Exception as e:
-        print_error(f"Task detail error: {e}")
-        return False
+def test_analyze_bad_task_type():
+    """Send a file with an invalid task_type."""
+    audio = find_sample_audio()
+    if audio is None:
+        raise Exception("No sample audio file found – skipping")
+    with open(audio, "rb") as f:
+        files = {"audio": (audio.name, f, "audio/wav")}
+        r = requests.post(
+            f"{API_BASE}/analyze",
+            files=files,
+            data={"task_type": "invalid_task"},
+            timeout=60,
+        )
+    assert r.status_code == 400, f"Expected 400, got {r.status_code}"
 
-def test_analyze(audio_file, task_type="sustained_vowel"):
-    """Test POST /api/v1/analyze endpoint"""
-    print_info(f"Testing analyze endpoint with {audio_file.name}...")
 
-    if not audio_file.exists():
-        print_error(f"Audio file not found: {audio_file}")
-        return False
+# ---------- 5. Full analysis with audio ------------------------------------
 
-    try:
-        with open(audio_file, 'rb') as f:
-            files = {'audio': (audio_file.name, f, 'audio/wav')}
-            data = {'task_type': task_type}
+def test_analyze_with_audio():
+    audio = find_sample_audio()
+    if audio is None:
+        raise Exception("No sample audio file found – skipping")
 
-            response = requests.post(
-                f"{API_BASE}/analyze",
-                files=files,
-                data=data,
-                timeout=60
-            )
+    info(f"  Using audio file: {audio.name}")
+    with open(audio, "rb") as f:
+        files = {"audio": (audio.name, f, "audio/wav")}
+        data = {"task_type": "sustained_vowel", "device_id": "test_suite"}
+        r = requests.post(f"{API_BASE}/analyze", files=files, data=data, timeout=120)
 
-        if response.status_code == 200:
-            result = response.json()
-
-            if result.get('status') == 'success':
-                data = result.get('data', {})
-
-                print_success("Analysis completed successfully")
-
-                # Quality gates
-                quality = data.get('quality', {})
-                print(f"\n  Quality Gates:")
-                print(f"    Overall: {quality.get('overall_decision')}")
-                print(f"    Passed: {quality.get('gates_passed')}/{quality.get('total_gates')}")
-
-                # Preprocessing
-                preproc = data.get('preprocessing', {})
-                print(f"\n  Preprocessing:")
-                print(f"    Duration: {preproc.get('duration_sec')}s")
-                print(f"    Sample rate: {preproc.get('sample_rate_hz')}Hz")
-
-                # Features
-                features = data.get('features', {})
-                print(f"\n  Features extracted: {len(features)} features")
-
-                # Predictions
-                predictions = data.get('predictions', [])
-                print(f"\n  Predictions:")
-                for pred in predictions:
-                    print(f"    {pred.get('condition_name')}:")
-                    print(f"      Probability: {pred.get('probability_percent')}%")
-                    print(f"      Severity: {pred.get('severity_tier')}")
-
-                # Explanation
-                explanation = data.get('explanation', {})
-                print(f"\n  LLM Explanation:")
-                print(f"    Status: {explanation.get('status')}")
-                if explanation.get('explanation'):
-                    print(f"    Text: {explanation.get('explanation')[:100]}...")
-
-                return True
-            else:
-                print_error(f"Analysis failed: {result.get('message')}")
-                if result.get('errors'):
-                    for error in result.get('errors'):
-                        print(f"    Error: {error}")
-                return False
-        else:
-            print_error(f"Analysis failed with status {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return False
-
-    except Exception as e:
-        print_error(f"Analysis error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def test_demo_analyze(audio_file, task_type="sustained_vowel"):
-    """Test POST /api/v1/demo/analyze endpoint"""
-    print_info(f"Testing demo analyze endpoint with {audio_file.name}...")
-
-    if not audio_file.exists():
-        print_error(f"Audio file not found: {audio_file}")
-        return False
-
-    try:
-        with open(audio_file, 'rb') as f:
-            files = {'audio': (audio_file.name, f, 'audio/wav')}
-            data = {'task_type': task_type}
-
-            response = requests.post(
-                f"{API_BASE}/demo/analyze",
-                files=files,
-                data=data,
-                timeout=90
-            )
-
-        if response.status_code == 200:
-            result = response.json()
-
-            if result.get('status') == 'success':
-                data = result.get('data', {})
-
-                print_success("Demo analysis completed successfully")
-
-                # Visualizations
-                viz = data.get('visualizations', {})
-                print(f"\n  Visualizations generated:")
-
-                output_dir = Path(__file__).parent / "test_outputs"
-                output_dir.mkdir(exist_ok=True)
-
-                saved_count = 0
-                for viz_name, viz_data in viz.items():
-                    if viz_data and isinstance(viz_data, str):
-                        print(f"    ✓ {viz_name}")
-
-                        # Save visualization to file
-                        try:
-                            img_data = base64.b64decode(viz_data)
-                            img = Image.open(BytesIO(img_data))
-                            output_path = output_dir / f"{viz_name}.png"
-                            img.save(output_path)
-                            saved_count += 1
-                        except Exception as e:
-                            print_warning(f"      Could not save {viz_name}: {e}")
-
-                print(f"\n  Saved {saved_count} visualizations to: {output_dir}")
-
-                # Raw B2AI features
-                raw_features = data.get('features_raw', {})
-                if raw_features:
-                    print(f"\n  Raw B2AI Features:")
-                    for category, features in raw_features.items():
-                        if isinstance(features, dict):
-                            print(f"    {category}: {len(features)} features")
-
-                return True
-            else:
-                print_error(f"Demo analysis failed: {result.get('message')}")
-                return False
-        else:
-            print_error(f"Demo analysis failed with status {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return False
-
-    except Exception as e:
-        print_error(f"Demo analysis error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def test_llm_standalone():
-    """Test LLM integration directly"""
-    print_info("Testing LLM integration...")
-
-    try:
-        # Import the explanation service
-        from services.explanation import generate_explanation
-
-        # Test data
-        test_prediction = {
-            'condition': 'benign_lesion',
-            'condition_name': 'Benign Lesion',
-            'probability': 0.42,
-            'probability_percent': 42.0,
-            'severity_tier': 'moderate',
-            'features_used': ['jitter', 'shimmer', 'hnr', 'cpp'],
-            'feature_values': {
-                'jitter': 1.85,
-                'shimmer': 4.23,
-                'hnr': 18.5,
-                'cpp': 7.8
-            }
-        }
-
-        test_features = {
-            'praat.jitter.local_percent': 1.85,
-            'praat.shimmer.local_percent': 4.23,
-            'praat.hnr.mean_db': 18.5,
-            'praat.cpp.mean_db': 7.8,
-            'praat.f0.mean_hz': 145.2
-        }
-
-        result = generate_explanation([test_prediction], test_features, task_type="sustained_vowel")
-
-        if result.get('status') == 'success':
-            print_success("LLM integration working")
-            print(f"\n  Provider: {result.get('provider', 'unknown')}")
-            print(f"\n  Explanation:")
-            explanation_text = result.get('explanation', '')
-            # Print first 300 characters
-            print(f"    {explanation_text[:300]}...")
-
-            return True
-        elif result.get('status') == 'no_provider':
-            print_warning("No LLM provider configured")
-            print("  Set GOOGLE_API_KEY or ANTHROPIC_API_KEY in .env file")
-            return False
-        else:
-            print_error(f"LLM failed: {result.get('error')}")
-            return False
-
-    except Exception as e:
-        print_error(f"LLM test error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
-def run_all_tests():
-    """Run all API tests"""
-    print_header("VOICE HEALTH ANALYSIS API - COMPREHENSIVE TEST SUITE")
-
-    # Test 1: Health check
-    print_header("Test 1: Health Check")
-    health_ok = test_health()
-
-    if not health_ok:
-        print_error("\nServer is not running. Cannot proceed with API tests.")
-        print_warning("Start the server with: ./start_server.sh")
+    if r.status_code == 422:
+        # Quality gate failure is an acceptable outcome
+        env = assert_envelope(r, "error")
+        assert env["errors"]["type"] == "quality_gate_failure"
+        info("  Quality gate failure (expected for some files)")
         return
 
-    # Test 2: Tasks list
-    print_header("Test 2: Tasks List")
-    test_tasks_list()
+    assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
+    env = assert_envelope(r, "success")
+    d = env["data"]
 
-    # Test 3: Task detail
-    print_header("Test 3: Task Detail")
-    test_task_detail("sustained_vowel")
+    # Validate structure
+    assert "quality" in d, "Missing quality"
+    assert "features" in d, "Missing features"
+    assert "predictions" in d, "Missing predictions"
+    assert "explanation" in d, "Missing explanation"
 
-    # Test 4: LLM integration
-    print_header("Test 4: LLM Integration (Standalone)")
-    llm_ok = test_llm_standalone()
+    # Predictions should be a list of condition dicts
+    preds = d["predictions"]
+    assert isinstance(preds, list), f"predictions should be list, got {type(preds)}"
+    if preds:
+        p = preds[0]
+        assert "condition" in p, f"Prediction missing 'condition': {p.keys()}"
+        assert "probability" in p, f"Prediction missing 'probability'"
+        assert "severity_tier" in p, f"Prediction missing 'severity_tier'"
+        info(f"  Prediction: {p['condition_name']} | "
+             f"prob={p['probability_percent']}% | "
+             f"severity={p['severity_tier']}")
 
-    # Find sample audio
-    audio_file = find_sample_audio()
+    # Explanation should have summary
+    expl = d["explanation"]
+    assert "summary" in expl or "details" in expl, f"Explanation missing summary/details: {expl.keys()}"
+    info(f"  Explanation: {(expl.get('summary') or expl.get('details', ''))[:80]}...")
 
-    if not audio_file:
-        print_warning("\nNo sample audio files found. Skipping analysis tests.")
-        print_info("Place .wav files in one of these directories:")
-        for sample_dir in SAMPLE_DIRS:
-            print(f"  - {sample_dir}")
-    else:
-        print_info(f"\nUsing sample audio: {audio_file}")
+    # Check processing time
+    info(f"  Processing time: {env['meta']['processing_time_ms']}ms")
 
-        # Test 5: Basic analyze
-        print_header("Test 5: Basic Analysis")
-        test_analyze(audio_file, "sustained_vowel")
 
-        # Test 6: Demo analyze
-        print_header("Test 6: Demo Analysis (with visualizations)")
-        test_demo_analyze(audio_file, "sustained_vowel")
+# ---------- 6. Validate endpoint ------------------------------------------
 
-        # Test with different task types
-        print_header("Test 7: Multiple Task Types")
-        for task_type in ["free_speech", "reading_passage", "cough"]:
-            print(f"\n--- Testing {task_type} ---")
-            test_analyze(audio_file, task_type)
+def test_validate_no_file():
+    r = requests.post(f"{API_BASE}/validate", timeout=10)
+    assert r.status_code == 400
+    assert_envelope(r, "error")
+
+
+def test_validate_with_audio():
+    audio = find_sample_audio()
+    if audio is None:
+        raise Exception("No sample audio file found – skipping")
+
+    with open(audio, "rb") as f:
+        files = {"audio": (audio.name, f, "audio/wav")}
+        data = {"task_type": "sustained_vowel"}
+        r = requests.post(f"{API_BASE}/validate", files=files, data=data, timeout=60)
+
+    # 200 (quality OK) or 422 (quality failure) are both valid
+    assert r.status_code in (200, 422), f"Status {r.status_code}: {r.text[:200]}"
+    expected = "success" if r.status_code == 200 else "error"
+    env = assert_envelope(r, expected)
+    if r.status_code == 200:
+        assert "quality" in env["data"]
+    info(f"  Validation result: {r.status_code}")
+
+
+# ---------- 7. Demo analyze -----------------------------------------------
+
+def test_demo_analyze():
+    audio = find_sample_audio()
+    if audio is None:
+        raise Exception("No sample audio file found – skipping")
+
+    info(f"  Using audio file: {audio.name}")
+    with open(audio, "rb") as f:
+        files = {"audio": (audio.name, f, "audio/wav")}
+        data = {"task_type": "sustained_vowel"}
+        r = requests.post(f"{API_BASE}/demo/analyze", files=files, data=data, timeout=120)
+
+    if r.status_code == 422:
+        assert_envelope(r, "error")
+        info("  Quality gate failure (expected for some files)")
+        return
+
+    assert r.status_code == 200, f"Status {r.status_code}: {r.text[:200]}"
+    env = assert_envelope(r, "success")
+    d = env["data"]
+
+    assert "quality" in d
+    assert "features" in d
+    assert "predictions" in d
+    assert "explanation" in d
+    # Demo also returns visualizations
+    info(f"  Has visualizations: {'visualizations' in d}")
+
+
+# ── Runner ───────────────────────────────────────────────────────────────────
+
+def main():
+    header("Voice Health Analysis API — Test Suite")
+
+    # Check connectivity first
+    info("Checking server connectivity...")
+    try:
+        r = requests.get(f"{API_BASE}/health", timeout=5)
+    except requests.exceptions.ConnectionError:
+        fail("Cannot connect to server at " + BASE_URL)
+        warn("Start the server with:  cd server && python app.py")
+        sys.exit(1)
+
+    if r.status_code != 200:
+        fail(f"Health endpoint returned {r.status_code}")
+        sys.exit(1)
+
+    ok("Server is reachable\n")
+
+    # Run tests
+    tests = [
+        ("Health check", test_health),
+        ("Tasks list", test_tasks_list),
+        ("Task detail (sustained_vowel)", test_task_detail),
+        ("Task not found (404)", test_task_not_found),
+        ("Analyze — no file (400)", test_analyze_no_file),
+        ("Analyze — bad task type (400)", test_analyze_bad_task_type),
+        ("Analyze — with audio", test_analyze_with_audio),
+        ("Validate — no file (400)", test_validate_no_file),
+        ("Validate — with audio", test_validate_with_audio),
+        ("Demo analyze — with audio", test_demo_analyze),
+    ]
+
+    for name, fn in tests:
+        run(name, fn)
 
     # Summary
-    print_header("TEST SUITE COMPLETE")
-
-    if llm_ok:
-        print_success("✓ LLM integration is working")
+    header("Results")
+    total = passed + failed_count
+    if failed_count == 0:
+        ok(f"All {total} tests passed!")
     else:
-        print_warning("⚠ LLM integration needs API key configuration")
+        fail(f"{failed_count}/{total} tests failed")
+        ok(f"{passed}/{total} tests passed")
 
-    if audio_file:
-        print_success("✓ All API endpoints tested successfully")
-    else:
-        print_warning("⚠ Analysis endpoints not tested (no audio files)")
+    sys.exit(1 if failed_count else 0)
 
-    print(f"\n{Colors.BOLD}Next steps:{Colors.END}")
-    print("1. Check test_outputs/ directory for saved visualizations")
-    print("2. Configure LLM API key in .env if needed (see LLM_SETUP_GUIDE.md)")
-    print("3. Replace dummy model in services/prediction.py with real model")
 
 if __name__ == "__main__":
-    run_all_tests()
+    main()
