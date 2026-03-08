@@ -223,28 +223,30 @@ export function RecordingFlow() {
   };
 
   return (
-    <div className="flex flex-col h-full text-purple-950 relative z-10 p-4 sm:p-6 lg:p-8 overflow-hidden" style={{ fontFamily: "var(--font-body)" }}>
+    <div className="flex flex-col h-full text-purple-950 relative z-10" style={{ fontFamily: "var(--font-body)" }}>
 
-      {/* Header */}
-      <header className="flex justify-between items-center mb-8 sm:mb-12 relative z-20">
+      {/* Header — matches Home theme */}
+      <header className="px-4 sm:px-6 py-4 flex items-center justify-between z-20 border-b border-purple-200/40" style={{ background: "rgba(255,255,255,0.55)", backdropFilter: "blur(16px)" }}>
         <button
+          type="button"
           onClick={() => { stopAudioStream(); navigate("/"); }}
-          className="text-purple-400 hover:text-purple-700 transition-colors"
+          className="flex items-center gap-2 text-purple-500 hover:text-purple-700 transition-colors"
         >
-          <XCircle className="w-6 h-6" />
+          <XCircle className="w-5 h-5" />
+          <span className="text-sm font-medium hidden sm:inline">Back</span>
         </button>
-        <span className="text-sm font-medium tracking-wide text-purple-500 uppercase">
+        <span className="text-[11px] font-semibold tracking-[0.15em] text-purple-400 uppercase">
           {flowState === "PREPARING" && "Get Ready"}
           {flowState === "COUNTDOWN" && "Starting..."}
           {flowState === "RECORDING" && "Recording"}
           {flowState === "ANALYZING" && "Analyzing"}
           {flowState === "RESULT" && "Done"}
         </span>
-        <div className="w-6" />
+        <div className="w-16 sm:w-20" />
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 flex flex-col items-center justify-center relative z-20">
+      <main className="flex-1 flex flex-col items-center justify-center relative z-20 p-4 sm:p-6 lg:p-8 overflow-y-auto">
 
         <AnimatePresence mode="wait">
 
@@ -254,7 +256,7 @@ export function RecordingFlow() {
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center text-center space-y-6 sm:space-y-8 w-full max-w-md mx-auto"
             >
-              <div className="w-20 h-20 sm:w-24 sm:h-24 bg-purple-100 rounded-full flex items-center justify-center border border-purple-200/60">
+              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.7)", backdropFilter: "blur(12px)" }}>
                 <Mic className="w-8 h-8 sm:w-10 sm:h-10 text-purple-600" />
               </div>
               <div>
@@ -264,8 +266,8 @@ export function RecordingFlow() {
                 </p>
               </div>
 
-              <div className="bg-white/70 border border-purple-200/50 rounded-2xl p-4 w-full text-left flex items-start gap-3 sm:gap-4 backdrop-blur-sm">
-                <div className="bg-purple-100 p-2 rounded-xl text-purple-600 shrink-0">
+              <div className="rounded-2xl border border-purple-200/50 p-4 w-full text-left flex items-start gap-3 sm:gap-4 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
+                <div className="bg-purple-100/80 p-2 rounded-xl text-purple-600 shrink-0 border border-purple-200/40">
                   <Play className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -293,14 +295,14 @@ export function RecordingFlow() {
                 <motion.div
                   animate={{ scale: [1, 1.15, 1] }}
                   transition={{ repeat: Infinity, duration: 1 }}
-                  className="absolute inset-0 bg-purple-200/40 rounded-full"
+                  className="absolute inset-0 rounded-full border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.6)" }}
                 />
                 <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse absolute top-2 right-2" />
                 <div className="text-[100px] font-black text-purple-600 drop-shadow-[0_0_30px_rgba(139,92,246,0.3)] tabular-nums leading-none">
                   {countdown}
                 </div>
               </div>
-              <div className="bg-purple-100/80 border border-purple-200/60 rounded-2xl p-6 w-full backdrop-blur-sm">
+              <div className="rounded-2xl border border-purple-200/50 p-6 w-full shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
                 <p className="text-purple-700 text-lg font-medium">Get ready to speak...</p>
                 <p className="text-purple-500/70 text-sm mt-1">Recording has started — your prompt will appear shortly</p>
               </div>
@@ -311,19 +313,17 @@ export function RecordingFlow() {
             <motion.div
               key="recording"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col items-center w-full space-y-6 sm:space-y-8"
+              className="flex flex-col items-center w-full max-w-lg mx-auto space-y-6 sm:space-y-8"
             >
-              <div className="w-full max-w-lg">
-                <div className="bg-white/60 border border-purple-200/50 rounded-2xl p-4 sm:p-5 backdrop-blur-sm">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
-                    <span className="text-xs text-purple-500 uppercase tracking-wider font-medium">Live Audio</span>
-                  </div>
-                  <LiveWaveform analyser={analyserRef.current} isActive={flowState === "RECORDING"} />
+              <div className="w-full rounded-2xl border border-purple-200/50 p-4 sm:p-5 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
+                  <span className="text-[11px] text-purple-400 uppercase tracking-[0.15em] font-semibold">Live Audio</span>
                 </div>
+                <LiveWaveform analyser={analyserRef.current} isActive={flowState === "RECORDING"} />
               </div>
 
-              <div className="text-center space-y-2">
+              <div className="w-full rounded-2xl border border-purple-200/50 p-4 sm:p-5 shadow-sm backdrop-blur-md text-center space-y-2" style={{ background: "rgba(255,255,255,0.7)" }}>
                 <div className="text-4xl sm:text-5xl font-black text-purple-900 tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
                   {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
                   <span className="text-2xl text-purple-400"> / {Math.floor(currentPrompt.recordingDuration / 60)}:{(currentPrompt.recordingDuration % 60).toString().padStart(2, '0')}</span>
@@ -334,7 +334,7 @@ export function RecordingFlow() {
                 </div>
               </div>
 
-              <div className="w-full bg-white/70 border border-purple-200/50 rounded-3xl p-4 sm:p-6 shadow-sm backdrop-blur-sm max-h-[40vh] overflow-y-auto">
+              <div className="w-full rounded-2xl border border-purple-200/50 p-4 sm:p-6 shadow-sm backdrop-blur-md max-h-[40vh] overflow-y-auto" style={{ background: "rgba(255,255,255,0.7)" }}>
                 {currentPrompt.type === "Reading" ? (
                   <div className="text-base sm:text-lg font-medium leading-relaxed text-purple-900 text-left">{currentPrompt.text}</div>
                 ) : (
@@ -359,7 +359,7 @@ export function RecordingFlow() {
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center space-y-6"
             >
-              <div className="relative w-32 h-32 flex items-center justify-center">
+              <div className="relative w-32 h-32 flex items-center justify-center rounded-full border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.6)" }}>
                 <svg className="w-full h-full animate-spin text-purple-200" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" />
                   <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" strokeDasharray="283" strokeDashoffset="200" className="text-purple-600" strokeLinecap="round" />
@@ -381,24 +381,24 @@ export function RecordingFlow() {
             >
               {isSuccess ? (
                 <>
-                  <div className="w-28 h-28 sm:w-32 sm:h-32 bg-emerald-100 rounded-full flex items-center justify-center border-4 border-emerald-400 relative">
+                  <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center border-4 border-emerald-400/60 relative shadow-sm" style={{ background: "rgba(255,255,255,0.8)" }}>
                     <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}>
                       <CheckCircle2 className="w-12 h-12 sm:w-16 sm:h-16 text-emerald-500" />
                     </motion.div>
                   </div>
-                  <div className="text-center space-y-2">
+                  <div className="text-center space-y-2 rounded-2xl border border-purple-200/50 p-6 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
                     <h2 className="text-2xl sm:text-3xl font-bold text-emerald-700" style={{ fontFamily: "var(--font-brand)" }}>Quality Check Passed</h2>
                     <p className="text-sm sm:text-base text-purple-500">Audio sample was clear and isolated.</p>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="w-28 h-28 sm:w-32 sm:h-32 bg-rose-100 rounded-full flex items-center justify-center border-4 border-rose-400 relative">
+                  <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center border-4 border-rose-400/60 relative shadow-sm" style={{ background: "rgba(255,255,255,0.8)" }}>
                     <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}>
                       <XCircle className="w-12 h-12 sm:w-16 sm:h-16 text-rose-500" />
                     </motion.div>
                   </div>
-                  <div className="text-center space-y-2">
+                  <div className="text-center space-y-2 rounded-2xl border border-purple-200/50 p-6 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
                     <h2 className="text-2xl sm:text-3xl font-bold text-rose-700" style={{ fontFamily: "var(--font-brand)" }}>Analysis Failed</h2>
                     <p className="text-sm sm:text-base text-purple-500">{analysisError || "We couldn't isolate your voice clearly."}</p>
                   </div>

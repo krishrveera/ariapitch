@@ -20,6 +20,7 @@ export function AudioLibrary() {
       {/* Header */}
       <header className="px-4 sm:px-6 py-4 flex items-center justify-between border-b border-neutral-900 z-20 bg-neutral-950">
         <button
+          type="button"
           onClick={() => navigate("/")}
           className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors"
         >

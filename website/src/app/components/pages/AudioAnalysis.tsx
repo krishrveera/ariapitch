@@ -82,11 +82,12 @@ export function AudioAnalysis() {
       {/* Header */}
       <header className="px-4 sm:px-6 py-4 flex items-center justify-between border-b border-neutral-900 z-20 bg-neutral-950/80 backdrop-blur-md sticky top-0">
         <button
-          onClick={() => navigate("/audio-library")}
+          type="button"
+          onClick={() => navigate("/")}
           className="flex items-center gap-2 text-neutral-400 hover:text-white transition-colors"
         >
           <ArrowLeft className="w-5 h-5" />
-          <span className="text-sm font-medium">Library</span>
+          <span className="text-sm font-medium">Back</span>
         </button>
         <h1 className="text-lg sm:text-xl font-bold tracking-tight">Analysis</h1>
         <button
