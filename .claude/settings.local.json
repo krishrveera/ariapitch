@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p server/{api,services,pipeline,models,utils})",
+      "Bash(chmod +x /Users/jaydenl/Dev/Hackathon/cornellhealthhack/server/setup.sh)",
+      "Bash(chmod +x /Users/jaydenl/Dev/Hackathon/cornellhealthhack/server/test_llm.py)",
+      "Bash(chmod +x /Users/jaydenl/Dev/Hackathon/cornellhealthhack/server/test_with_samples.py)",
+      "Bash(chmod +x /Users/jaydenl/Dev/Hackathon/cornellhealthhack/server/start_server.sh)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
