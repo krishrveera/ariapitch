@@ -32,8 +32,8 @@ export function LiveWaveform({ analyser, isActive }: LiveWaveformProps) {
 
             ctx.clearRect(0, 0, w, h);
 
-            // Draw waveform
-            ctx.lineWidth = 2.5;
+            // Draw waveform (primary stroke)
+            ctx.lineWidth = 3.2;
             ctx.strokeStyle = "#818cf8"; // indigo-400
             ctx.beginPath();
 
@@ -56,8 +56,8 @@ export function LiveWaveform({ analyser, isActive }: LiveWaveformProps) {
             ctx.stroke();
 
             // Draw glow effect
-            ctx.lineWidth = 6;
-            ctx.strokeStyle = "rgba(129, 140, 248, 0.15)";
+            ctx.lineWidth = 7;
+            ctx.strokeStyle = "rgba(129, 140, 248, 0.24)";
             ctx.beginPath();
             x = 0;
             for (let i = 0; i < bufferLength; i++) {

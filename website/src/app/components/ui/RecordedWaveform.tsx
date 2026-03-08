@@ -66,7 +66,7 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
             const step = Math.max(1, Math.floor(totalSamples / w));
 
             // Draw main waveform
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 2.2;
             ctx.strokeStyle = "#818cf8"; // indigo-400
             ctx.beginPath();
 
@@ -93,7 +93,7 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
             ctx.stroke();
 
             // Waveform fill
-            ctx.fillStyle = "rgba(129, 140, 248, 0.08)";
+            ctx.fillStyle = "rgba(129, 140, 248, 0.14)";
             ctx.beginPath();
             for (let x = 0; x < w; x++) {
                 const sampleIndex = Math.floor((x / w) * totalSamples);
