@@ -1,0 +1,36 @@
+# Flask Server Requirements
+# Voice Health Analysis API - B2AI-Voice Aligned
+
+# Web Framework
+Flask==3.0.0
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Audio Processing
+librosa==0.10.1
+soundfile==0.12.1
+pyloudnorm==0.1.1
+noisereduce==3.0.0
+scipy==1.11.4
+numpy==1.26.2
+
+# Feature Extraction (B2AI-Voice aligned)
+senselab>=0.20.0  # Bridge2AI-Voice feature extraction (recommended)
+praat-parselmouth==0.4.3  # Fallback if SenseLab unavailable
+torch>=2.0.0  # Required by SenseLab
+torchaudio>=2.0.0  # Required by SenseLab
+transformers>=4.30.0  # For PPG extraction
+opensmile>=2.5.0  # OpenSMILE features
+
+# ML/AI (LLM Providers - install at least one)
+google-generativeai>=0.3.0  # For Gemini (recommended, free tier available)
+anthropic>=0.18.1  # For Claude (optional alternative)
+
+# Visualization (for demo endpoint)
+matplotlib>=3.7.0
+Pillow>=10.0.0
+
+# Utilities
+werkzeug==3.0.1
+python-dotenv==1.0.0
+requests>=2.31.0  # For test script
