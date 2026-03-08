@@ -6,9 +6,27 @@ import uuid
 from datetime import datetime, timezone
 from flask import jsonify
 import time
+import numpy as np
 
 
 _request_start_time = {}
+
+
+def _convert_numpy_types(obj):
+    """Recursively convert numpy types to Python native types."""
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: _convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_numpy_types(item) for item in obj]
+    return obj
 
 
 def start_timer(request_id: str):
@@ -21,6 +39,9 @@ def success_response(data: dict, message: str = "OK", code: int = 200,
     """Build a success envelope."""
     request_id = request_id or str(uuid.uuid4())
     elapsed = _get_elapsed(request_id)
+
+    # Convert numpy types to Python native types
+    data = _convert_numpy_types(data)
 
     body = {
         "status": "success",
@@ -47,11 +68,11 @@ def error_response(error_type: str, message: str, code: int = 400,
 
     errors = {"type": error_type}
     if failed_checks is not None:
-        errors["failed_checks"] = failed_checks
+        errors["failed_checks"] = _convert_numpy_types(failed_checks)
     if passed_checks is not None:
-        errors["passed_checks"] = passed_checks
+        errors["passed_checks"] = _convert_numpy_types(passed_checks)
     if warnings is not None:
-        errors["warnings"] = warnings
+        errors["warnings"] = _convert_numpy_types(warnings)
     if suggestion is not None:
         errors["suggestion"] = suggestion
 

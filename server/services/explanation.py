@@ -7,7 +7,7 @@ import os
 
 # Try to import both LLM providers
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -27,26 +27,39 @@ gemini_client = None
 anthropic_client = None
 
 if GEMINI_AVAILABLE and os.environ.get("GOOGLE_API_KEY"):
-    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-    gemini_client = genai.GenerativeModel("gemini-1.5-flash")
+    gemini_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
 if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
     anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def _call_gemini(prompt: str, max_tokens: int = 1000) -> str:
-    """Call Google Gemini API."""
+    """Call Google Gemini API using new google.genai package."""
     if gemini_client is None:
         raise ValueError("Gemini client not initialized")
 
-    response = gemini_client.generate_content(
-        prompt,
-        generation_config={
-            "max_output_tokens": max_tokens,
-            "temperature": 0.7,
-        }
-    )
-    return response.text
+    try:
+        # Use the latest available Gemini flash model with JSON mode
+        response = gemini_client.models.generate_content(
+            model='models/gemini-2.5-flash',
+            contents=prompt,
+            config={
+                "max_output_tokens": max_tokens,
+                "temperature": 0.7,
+                "response_mime_type": "application/json",  # Force JSON output
+            }
+        )
+
+        # Check if response was truncated
+        if response.candidates:
+            finish_reason = str(response.candidates[0].finish_reason)
+            if 'MAX_TOKENS' in finish_reason or 'LENGTH' in finish_reason:
+                print(f"Warning: Gemini response was truncated ({finish_reason})")
+
+        return response.text
+    except Exception as e:
+        print(f"Gemini API error: {e}")
+        raise
 
 
 def _call_anthropic(prompt: str, max_tokens: int = 1000) -> str:
@@ -156,24 +169,45 @@ Rules:
 - Reference the clinical threshold values when comparing features"""
 
     try:
-        text = _call_llm(prompt, max_tokens=1000)
+        text = _call_llm(prompt, max_tokens=2000)
 
         if text is None:
             # No LLM available
             return fallback
 
-        # Parse LLM response
+        # Parse LLM response - handle markdown code blocks and extract JSON
         cleaned = text.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned.split("\n", 1)[1]
-            cleaned = cleaned.rsplit("```", 1)[0]
-        elif cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1]
-            cleaned = cleaned.rsplit("```", 1)[0]
+
+        # Remove markdown code blocks if present
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            # Remove first line (```json, ```, or just the language name)
+            if lines and lines[0].strip().startswith("```"):
+                lines = lines[1:]
+            # Remove last line if it's ```
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+
+        # Try to extract JSON object if there's still extra text
+        if not cleaned.startswith("{"):
+            start_idx = cleaned.find("{")
+            end_idx = cleaned.rfind("}") + 1
+            if start_idx >= 0 and end_idx > start_idx:
+                cleaned = cleaned[start_idx:end_idx]
 
         parsed = json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        # Fallback on JSON parsing error
+        print(f"LLM explanation JSON parse error: {e}")
+        print(f"Cleaned text (first 500 chars): {cleaned[:500]}")
+        print(f"Full cleaned text:\n{cleaned}")
+        parsed = {
+            "summary": "Analysis complete. Please review the detailed results below.",
+            "details": "Your voice features have been extracted and analyzed against clinical reference ranges."
+        }
     except Exception as e:
-        # Fallback on error
+        # Fallback on other errors
         print(f"LLM explanation error: {e}")
         parsed = {
             "summary": "Analysis complete. Please review the detailed results below.",
@@ -210,10 +244,14 @@ def generate_quality_failure_suggestion(gate_result: dict) -> str:
         return templates.get(check["check"], "Please try recording again.")
 
     # Multiple failures - use LLM for combined advice
+    # Convert failed checks to JSON-serializable format
+    from api.response import _convert_numpy_types
+    failed_clean = _convert_numpy_types(failed)
+
     prompt = f"""A user tried to record their voice for health analysis but the recording failed quality checks. Generate ONE short paragraph (2-3 sentences) of friendly, practical advice addressing all issues.
 
 Failed checks:
-{json.dumps(failed, indent=2)}
+{json.dumps(failed_clean, indent=2)}
 
 Be specific and actionable. Don't list the technical details — translate them into simple instructions the user can follow."""
 

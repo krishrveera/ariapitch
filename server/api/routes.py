@@ -212,6 +212,31 @@ def tasks():
     )
 
 
+@api_bp.route("/tasks/<task_id>", methods=["GET"])
+def task_detail(task_id):
+    """Get details for a specific task."""
+    request_id = str(uuid.uuid4())
+    start_timer(request_id)
+
+    from services.task_definitions import get_task_by_id
+    task = get_task_by_id(task_id)
+
+    if not task:
+        return error_response(
+            error_type="not_found",
+            message=f"Task '{task_id}' not found.",
+            code=404,
+            suggestion="Use GET /api/v1/tasks to see available task IDs.",
+            request_id=request_id
+        )
+
+    return success_response(
+        data={"task": task},
+        message=f"Task '{task_id}' retrieved.",
+        request_id=request_id
+    )
+
+
 @api_bp.route("/demo/analyze", methods=["POST"])
 def demo_analyze():
     """
