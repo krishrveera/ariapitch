@@ -56,6 +56,8 @@ type UserData = {
     pitch: number;
     shimmer: number;
     jitter: number;
+    spectralCentroid?: number;
+    harmonicRatio?: number;
     message: string;
     isAnomaly: boolean;
   }>;
@@ -72,12 +74,12 @@ const defaultData: UserData = {
   hasRecordedToday: false,
   streak: 5,
   history: [
-    { date: 'Mon', pitch: 210, shimmer: 3.2, jitter: 1.1, message: "Your voice sounds steady today. Great job!", isAnomaly: false },
-    { date: 'Tue', pitch: 215, shimmer: 3.5, jitter: 1.2, message: "Slight variation in shimmer, but within normal range.", isAnomaly: false },
-    { date: 'Wed', pitch: 208, shimmer: 3.1, jitter: 1.0, message: "Looking perfectly healthy!", isAnomaly: false },
-    { date: 'Thu', pitch: 212, shimmer: 3.8, jitter: 1.3, message: "Pitch is right on target.", isAnomaly: false },
-    { date: 'Fri', pitch: 210, shimmer: 3.4, jitter: 1.1, message: "Voice is clear. Keep hydrating!", isAnomaly: false },
-    { date: 'Sat', pitch: 218, shimmer: 3.9, jitter: 1.4, message: "A little extra effort detected, remember to rest.", isAnomaly: false },
+    { date: 'Monday, Mar 3', pitch: 210, shimmer: 3.2, jitter: 1.1, spectralCentroid: 1480, harmonicRatio: 17.2, message: "Your voice sounds steady today. Great job!", isAnomaly: false },
+    { date: 'Tuesday, Mar 4', pitch: 215, shimmer: 3.5, jitter: 1.2, spectralCentroid: 1520, harmonicRatio: 18.1, message: "Slight variation in shimmer, but within normal range.", isAnomaly: false },
+    { date: 'Wednesday, Mar 5', pitch: 208, shimmer: 3.1, jitter: 1.0, spectralCentroid: 1510, harmonicRatio: 19.3, message: "Looking perfectly healthy!", isAnomaly: false },
+    { date: 'Thursday, Mar 6', pitch: 212, shimmer: 3.8, jitter: 1.3, spectralCentroid: 1490, harmonicRatio: 16.8, message: "Pitch is right on target.", isAnomaly: false },
+    { date: 'Friday, Mar 7', pitch: 210, shimmer: 3.4, jitter: 1.1, spectralCentroid: 1530, harmonicRatio: 18.5, message: "Voice is clear. Keep hydrating!", isAnomaly: false },
+    { date: 'Saturday, Mar 8', pitch: 218, shimmer: 3.9, jitter: 1.4, spectralCentroid: 1545, harmonicRatio: 17.9, message: "A little extra effort detected, remember to rest.", isAnomaly: false },
   ],
   audioRecordings: [],
   showHealthPopup: false,

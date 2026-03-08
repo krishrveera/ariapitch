@@ -30,9 +30,9 @@ export function Spectrogram({ audioData, sampleRate = 44100 }: SpectrogramProps)
         const numBins = fftSize / 2;
 
         if (numFrames <= 0) {
-            ctx.fillStyle = "#171717";
+            ctx.fillStyle = "#f5f3ff";
             ctx.fillRect(0, 0, w, h);
-            ctx.fillStyle = "#525252";
+            ctx.fillStyle = "#94a3b8";
             ctx.font = "12px sans-serif";
             ctx.textAlign = "center";
             ctx.fillText("Audio too short for spectrogram", w / 2, h / 2);
@@ -81,21 +81,21 @@ export function Spectrogram({ audioData, sampleRate = 44100 }: SpectrogramProps)
         }
         const dbFloor = globalMax - 60; // 60dB dynamic range
 
-        // Color map: dark purple → indigo → cyan → yellow
+        // Color map: soft lavender → violet → purple → warm rose
         const colorMap = (normalized: number): [number, number, number] => {
             const t = Math.max(0, Math.min(1, normalized));
             if (t < 0.25) {
                 const s = t / 0.25;
-                return [Math.round(20 + s * 40), Math.round(10 + s * 10), Math.round(40 + s * 60)];
+                return [Math.round(237 + s * (-30)), Math.round(233 + s * (-30)), Math.round(254 + s * (-20))];
             } else if (t < 0.5) {
                 const s = (t - 0.25) / 0.25;
-                return [Math.round(60 + s * 40), Math.round(20 + s * 60), Math.round(100 + s * 60)];
+                return [Math.round(207 - s * 70), Math.round(203 - s * 100), Math.round(234 - s * 10)];
             } else if (t < 0.75) {
                 const s = (t - 0.5) / 0.25;
-                return [Math.round(100 - s * 60), Math.round(80 + s * 120), Math.round(160 + s * 40)];
+                return [Math.round(137 - s * 13), Math.round(103 - s * 45), Math.round(224 - s * (-13))];
             } else {
                 const s = (t - 0.75) / 0.25;
-                return [Math.round(40 + s * 215), Math.round(200 + s * 55), Math.round(200 - s * 160)];
+                return [Math.round(124 + s * 120), Math.round(58 + s * 30), Math.round(237 - s * 100)];
             }
         };
 
@@ -121,7 +121,7 @@ export function Spectrogram({ audioData, sampleRate = 44100 }: SpectrogramProps)
         }
 
         // Draw frequency axis labels
-        ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+        ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
         ctx.font = "10px sans-serif";
         ctx.textAlign = "left";
 
@@ -132,7 +132,7 @@ export function Spectrogram({ audioData, sampleRate = 44100 }: SpectrogramProps)
             const y = h - (freq / maxFreq) * h;
             ctx.fillText(`${freq >= 1000 ? `${freq / 1000}k` : freq}Hz`, 4, y - 2);
 
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
             ctx.lineWidth = 0.5;
             ctx.beginPath();
             ctx.moveTo(0, y);

@@ -1,46 +1,40 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router";
+import { useNavigate } from "react-router";
 import { useAppContext } from "../../AppContext";
 import { motion, AnimatePresence } from "motion/react";
-import { Mic, CheckCircle2, XCircle, Play, Square, Activity } from "lucide-react";
-import { analyzeAudio, extractBiomarkers, generateMessage, runDemoAnalysis } from "../../services/api";
+import { Mic, CheckCircle2, XCircle, AlertTriangle, Play, Square, Activity } from "lucide-react";
+import { analyzeAudio, extractBiomarkers, generateMessage } from "../../services/api";
 import { LiveWaveform } from "../ui/LiveWaveform";
 
-type FlowState = "PREPARING" | "INITIAL_DELAY" | "SILENCE_COUNTDOWN" | "SILENCE_RECORDING" | "RECORDING" | "ANALYZING" | "RESULT" | "SHOW_DATA";
+type FlowState = "PREPARING" | "INITIAL_DELAY" | "SILENCE_COUNTDOWN" | "SILENCE_RECORDING" | "RECORDING" | "ANALYZING" | "RESULT";
 
-// We will load prompts dynamically from the server
-interface Prompt {
-  id: string;
-  type: string;
-  text: string;
-  instruction: string;
-  recordingDuration: number;
-}
+const PROMPTS = [
+  {
+    type: "Vowel",
+    text: "1, 2, 3 aah",
+    instruction: "Repeat '1, 2, 3 aah' in your normal voice and hold the sound 'aah' for as long as you can",
+    recordingDuration: 10, // seconds - sustained vowel
+  },
+  {
+    type: "Reading",
+    text: "Do you like amusement parks? Well, I sure do. To amuse myself, I went twice last spring. My most MEMORABLE moment was riding on the Caterpillar, which is a gigantic rollercoaster high above the ground. When I saw how high the Caterpillar rose into the bright blue sky I knew it was for me. After waiting in line for thirty minutes, I made it to the front where the man measured my height to see if I was tall enough. I gave the man my coins, asked for change, and jumped on the cart. Tick, tick, tick, the Caterpillar climbed slowly up the tracks. It went SO high I could see the parking lot. Boy was I SCARED! I thought to myself, \"There's no turning back now.\" People were so scared they screamed as we swiftly zoomed fast, fast, and faster along the tracks. As quickly as it started, the Caterpillar came to a stop. Unfortunately, it was time to pack the car and drive home. That night I dreamt of the wild ride on the Caterpillar. Taking a trip to the amusement park and riding on the Caterpillar was my MOST memorable moment ever!",
+    instruction: "Read the Caterpillar Passage out loud in your typical voice",
+    recordingDuration: 110, // seconds - 1:50 as per protocol
+  }
+];
 
 export function RecordingFlow() {
   const { userData, setUserData } = useAppContext();
   const navigate = useNavigate();
-  const location = useLocation();
-  const isDemoMode = (location.state as any)?.demoMode || false;
-
   const [flowState, setFlowState] = useState<FlowState>("PREPARING");
-  const [silenceCountdown, setSilenceCountdown] = useState(3);
+  const [countdown, setCountdown] = useState(2); // Initial delay countdown
+  const [silenceCountdown, setSilenceCountdown] = useState(3); // 3 seconds of silence
   const [recordingTime, setRecordingTime] = useState(0);
-  const [currentPrompt, setCurrentPrompt] = useState<Prompt | null>(null);
+  const [currentPrompt, setCurrentPrompt] = useState(PROMPTS[1]);
+  const [activeWordIndex, setActiveWordIndex] = useState(0);
   const [isSuccess, setIsSuccess] = useState(true);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [displayData, setDisplayData] = useState<{
-    pitch: number;
-    shimmer: number;
-    jitter: number;
-    spectralCentroid: number;
-    harmonicRatio: number;
-    message: string;
-    isAnomaly: boolean;
-    snr?: number;
-    voicedDuration?: number;
-  } | null>(null);
 
   // Audio refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -49,34 +43,16 @@ export function RecordingFlow() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
+  // Initialize
   useEffect(() => {
-    import("../../services/api").then(({ getTasks }) => {
-      getTasks().then(serverTasks => {
-        if (serverTasks && serverTasks.length > 0) {
-          const formattedPrompts: Prompt[] = serverTasks.map(t => ({
-            id: t.id,
-            type: t.display_name,
-            text: t.prompt_text || t.instruction,
-            instruction: t.instruction,
-            recordingDuration: t.min_duration_sec
-          }));
-          setCurrentPrompt(formattedPrompts[Math.floor(Math.random() * formattedPrompts.length)]);
-        } else {
-          // Fallback
-          setCurrentPrompt({
-            id: "prolonged_vowel",
-            type: "Vowel Task",
-            text: "1, 2, 3 aah",
-            instruction: "Repeat '1, 2, 3 aah' in your normal voice and hold the sound 'aah' for as long as you can",
-            recordingDuration: 10
-          });
-        }
-      });
-    });
+    setCurrentPrompt(PROMPTS[Math.floor(Math.random() * PROMPTS.length)]);
   }, []);
 
+  // Cleanup on unmount
   useEffect(() => {
-    return () => { stopAudioStream(); };
+    return () => {
+      stopAudioStream();
+    };
   }, []);
 
   const stopAudioStream = () => {
@@ -98,16 +74,21 @@ export function RecordingFlow() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
+
       const audioCtx = new AudioContext();
       audioContextRef.current = audioCtx;
+
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.8;
       source.connect(analyser);
       analyserRef.current = analyser;
+
+      // Don't start recording yet - we'll do that after silence period
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
+
       return true;
     } catch (err) {
       console.error("Microphone access denied:", err);
@@ -129,16 +110,32 @@ export function RecordingFlow() {
   const stopAndProcessAudio = async () => {
     return new Promise<void>((resolve) => {
       const mediaRecorder = mediaRecorderRef.current;
-      if (!mediaRecorder || mediaRecorder.state === "inactive") { resolve(); return; }
+      if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        resolve();
+        return;
+      }
+
       mediaRecorder.onstop = async () => {
         try {
           const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+
+          // Save blob for API call
           setAudioBlob(blob);
+
           const arrayBuffer = await blob.arrayBuffer();
+
+          // Decode audio data to get raw samples
           const audioCtx = new AudioContext();
           const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
           const channelData = audioBuffer.getChannelData(0);
-          setUserData(prev => ({ ...prev, lastRecordingData: new Float32Array(channelData), lastRecordingSampleRate: audioBuffer.sampleRate }));
+
+          // Store in context
+          setUserData(prev => ({
+            ...prev,
+            lastRecordingData: new Float32Array(channelData),
+            lastRecordingSampleRate: audioBuffer.sampleRate,
+          }));
+
           await audioCtx.close();
         } catch (err) {
           console.error("Error processing audio:", err);
@@ -146,40 +143,47 @@ export function RecordingFlow() {
         }
         resolve();
       };
+
       mediaRecorder.stop();
-      if (mediaStreamRef.current) { mediaStreamRef.current.getTracks().forEach(t => t.stop()); }
+
+      // Stop the media stream tracks
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      }
     });
   };
 
-  // Initial delay before countdown
+  // Initial Delay Logic - Give user time to understand what's happening
   useEffect(() => {
+    let timer: NodeJS.Timeout;
     if (flowState === "INITIAL_DELAY") {
-      const timer = setTimeout(() => {
+      if (countdown > 0) {
+        timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+      } else {
         setFlowState("SILENCE_COUNTDOWN");
-        setSilenceCountdown(3);
-      }, 1000);
-      return () => clearTimeout(timer);
+        setSilenceCountdown(3); // Reset silence countdown
+      }
     }
-  }, [flowState]);
+    return () => clearTimeout(timer);
+  }, [countdown, flowState]);
 
-  // Silence countdown: 3 → 2 → 1 → start silence recording
+  // Silence Countdown Logic
   useEffect(() => {
+    let timer: NodeJS.Timeout;
     if (flowState === "SILENCE_COUNTDOWN") {
-      let timer: ReturnType<typeof setTimeout>;
       if (silenceCountdown > 0) {
         timer = setTimeout(() => setSilenceCountdown(c => c - 1), 1000);
       } else {
         setFlowState("SILENCE_RECORDING");
         setRecordingTime(0);
       }
-      return () => clearTimeout(timer);
     }
+    return () => clearTimeout(timer);
   }, [silenceCountdown, flowState]);
-
 
   // Silence Recording Timer - 3 seconds of silence
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: NodeJS.Timeout;
     if (flowState === "SILENCE_RECORDING") {
       if (recordingTime < 3) {
         timer = setTimeout(() => setRecordingTime(t => t + 1), 1000);
@@ -193,59 +197,64 @@ export function RecordingFlow() {
 
   // Start actual recording when entering silence countdown (need to capture the silence)
   useEffect(() => {
-    if (flowState === "SILENCE_COUNTDOWN" && !isDemoMode) {
+    if (flowState === "SILENCE_COUNTDOWN") {
       startRecording();
     }
-  }, [flowState, isDemoMode]);
+  }, [flowState]);
 
   // Recording Timer - Auto-stop after duration
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    if (flowState === "RECORDING" && currentPrompt) {
+    let timer: NodeJS.Timeout;
+    if (flowState === "RECORDING") {
       if (recordingTime < currentPrompt.recordingDuration) {
         timer = setTimeout(() => setRecordingTime(t => t + 1), 1000);
       } else {
+        // Auto-stop recording when time is up
         handleStopRecording();
       }
     }
     return () => clearTimeout(timer);
   }, [recordingTime, flowState, currentPrompt]);
 
-  // Analyzing Logic - Call real API or demo API
+  // Analyzing Logic - Call real API
   useEffect(() => {
-    if (flowState === "ANALYZING") {
+    if (flowState === "ANALYZING" && audioBlob) {
       const runAnalysis = async () => {
         try {
           setAnalysisError(null);
 
-          let result;
+          // Determine task type based on prompt
+          const taskType = currentPrompt.type === "Vowel" ? "sustained_vowel" : "reading_passage";
 
-          if (isDemoMode) {
-            // Demo mode: use pre-loaded sample file
-            result = await runDemoAnalysis();
-          } else if (audioBlob && currentPrompt) {
-            // Normal mode: use recorded audio
-            result = await analyzeAudio(audioBlob, {
-              deviceId: 'web_app',
-              taskType: (currentPrompt.id as any),
-              silenceDuration: 0.5,
-            });
-          } else {
-            throw new Error("No audio data available");
-          }
+          // Call the backend API
+          const result = await analyzeAudio(audioBlob, {
+            deviceId: 'web_app',
+            taskType,
+            silenceDuration: 0.5,
+          });
 
           if (result.success && result.data) {
+            // Analysis successful
             setIsSuccess(true);
+
+            // Extract biomarkers from features
             const biomarkers = extractBiomarkers(result.data.features);
-            const { message, isAnomaly } = generateMessage(result.data.predictions, result.data.explanation);
+
+            // Generate user-friendly message
+            const { message, isAnomaly } = generateMessage(
+              result.data.predictions,
+              result.data.explanation
+            );
+
+            // Store results temporarily for finishRecording
             (window as any).__analysisResult = {
               biomarkers,
               message,
               isAnomaly,
               predictions: result.data.predictions,
-              quality: result.data.quality
             };
           } else {
+            // Analysis failed - quality gate or error
             setIsSuccess(false);
             setAnalysisError(result.error?.message || "Analysis failed");
           }
@@ -257,50 +266,41 @@ export function RecordingFlow() {
           setFlowState("RESULT");
         }
       };
+
       runAnalysis();
     }
-  }, [flowState, audioBlob, currentPrompt, isDemoMode]);
+  }, [flowState, audioBlob, currentPrompt]);
 
   const handleStart = async () => {
+    setCountdown(2);
     setSilenceCountdown(3);
     setRecordingTime(0);
+    setActiveWordIndex(0);
 
-    if (isDemoMode) {
-      // Demo mode: request microphone for live audio visualization, but won't record
-      const ok = await startAudioCapture();
+    const ok = await startAudioCapture();
+    if (ok) {
       setFlowState("INITIAL_DELAY");
-      if (!ok) {
-        console.warn("Demo mode: microphone access denied, proceeding without live visualization");
-      }
     } else {
-      // Normal mode: request microphone access
-      const ok = await startAudioCapture();
-      if (ok) {
-        setFlowState("INITIAL_DELAY");
-      } else {
-        // Fallback: proceed without audio if mic is denied
-        setFlowState("INITIAL_DELAY");
-      }
+      // Fallback: proceed without audio if mic is denied
+      setFlowState("INITIAL_DELAY");
     }
   };
 
   const handleStopRecording = async () => {
-    if (isDemoMode) {
-      // Demo mode: skip audio processing, go straight to analysis
-      setFlowState("ANALYZING");
-    } else {
-      // Normal mode: process recorded audio
-      await stopAndProcessAudio();
-      stopAudioStream();
-      setFlowState("ANALYZING");
-    }
+    await stopAndProcessAudio();
+    stopAudioStream();
+    setFlowState("ANALYZING");
   };
 
   const finishRecording = () => {
     if (isSuccess) {
+      // Get analysis results from window (set in analyzing effect)
       const analysisResult = (window as any).__analysisResult;
-      let pitch, shimmer, jitter, message, isAnomaly, spectralCentroid, harmonicRatio, snr, voicedDuration;
+
+      let pitch, shimmer, jitter, message, isAnomaly, spectralCentroid, harmonicRatio;
+
       if (analysisResult) {
+        // Use real analysis results
         pitch = analysisResult.biomarkers.pitch;
         shimmer = analysisResult.biomarkers.shimmer;
         jitter = analysisResult.biomarkers.jitter;
@@ -309,12 +309,10 @@ export function RecordingFlow() {
         message = analysisResult.message;
         isAnomaly = analysisResult.isAnomaly;
 
-        // Extract quality metrics if available
-        snr = analysisResult.quality?.snr_db;
-        voicedDuration = analysisResult.quality?.voiced_duration_sec;
-
+        // Clean up
         delete (window as any).__analysisResult;
       } else {
+        // Fallback to dummy data if analysis failed
         pitch = Math.round(200 + Math.random() * 20);
         shimmer = Number((3 + Math.random() * 1.5).toFixed(1));
         jitter = Number((1 + Math.random() * 1).toFixed(1));
@@ -324,24 +322,13 @@ export function RecordingFlow() {
         isAnomaly = false;
       }
 
-      // Store display data
-      setDisplayData({
+      const newEntry = {
+        date: new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
         pitch,
         shimmer,
         jitter,
         spectralCentroid,
         harmonicRatio,
-        message,
-        isAnomaly,
-        snr,
-        voicedDuration,
-      });
-
-      const newEntry = {
-        date: new Date().toLocaleDateString('en-US', { weekday: 'short' }),
-        pitch,
-        shimmer,
-        jitter,
         message,
         isAnomaly,
       };
@@ -357,54 +344,65 @@ export function RecordingFlow() {
         const audioRecording = {
           id: `rec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          timestamp: Date.now(), pitch, shimmer, jitter, message, isAnomaly, duration: recordingTime, spectralCentroid, harmonicRatio,
-          formants: [Math.round(700 + Math.random() * 100), Math.round(1200 + Math.random() * 200), Math.round(2500 + Math.random() * 300)],
+          timestamp: Date.now(),
+          pitch,
+          shimmer,
+          jitter,
+          message,
+          isAnomaly,
+          duration: recordingTime,
+          spectralCentroid,
+          harmonicRatio,
+          formants: [
+            Math.round(700 + Math.random() * 100),
+            Math.round(1200 + Math.random() * 200),
+            Math.round(2500 + Math.random() * 300),
+          ],
         };
+
         updates.audioRecordings = [...userData.audioRecordings, audioRecording];
       }
-      setUserData(prev => ({ ...prev, ...updates }));
 
-      // Show the data screen instead of navigating home
-      setFlowState("SHOW_DATA");
-    } else {
-      // If failed, restart
-      navigate("/");
+      setUserData(prev => ({ ...prev, ...updates }));
     }
+    navigate("/");
   };
 
   return (
-    <div className="flex flex-col h-full text-purple-950 relative z-10" style={{ fontFamily: "var(--font-body)" }}>
+    <div className="flex flex-col h-full max-h-screen bg-[#faf8ff] text-slate-900 relative z-10 p-4 sm:p-6 lg:p-8 overflow-hidden">
 
-      {/* Header — matches Home theme */}
-      <header className="px-4 sm:px-6 py-4 flex items-center justify-between z-20 border-b border-purple-200/40" style={{ background: "rgba(255,255,255,0.55)", backdropFilter: "blur(16px)" }}>
+      {/* Header */}
+      <header className="flex justify-between items-center mb-4 sm:mb-6 relative z-20 flex-shrink-0">
         <button
-          type="button"
-          onClick={() => { stopAudioStream(); navigate("/"); }}
-          className="flex items-center gap-2 text-purple-500 hover:text-purple-700 transition-colors"
+          onClick={() => {
+            stopAudioStream();
+            if (flowState === "RESULT" && !isSuccess) {
+              setFlowState("PREPARING");
+              setAudioBlob(null);
+              setAnalysisError(null);
+            } else {
+              navigate("/");
+            }
+          }}
+          className="text-slate-400 hover:text-slate-700 transition-colors"
         >
-          <XCircle className="w-5 h-5" />
-          <span className="text-sm font-medium hidden sm:inline">Back</span>
+          <XCircle className="w-8 h-8" />
         </button>
-        <div className="flex flex-col items-center">
-          {isDemoMode && (
-            <span className="text-xs font-bold tracking-wider text-cyan-400 mb-1">DEMO MODE</span>
-          )}
-          <span className="text-sm font-medium tracking-wide text-neutral-400 uppercase">
-            {flowState === "PREPARING" && "Get Ready"}
-            {flowState === "INITIAL_DELAY" && "Get Ready"}
-            {flowState === "SILENCE_COUNTDOWN" && "Prepare for Silence"}
-            {flowState === "SILENCE_RECORDING" && "Recording Silence"}
-            {flowState === "RECORDING" && "Recording"}
-            {flowState === "ANALYZING" && "Analyzing"}
-            {flowState === "RESULT" && "Done"}
-            {flowState === "SHOW_DATA" && "Your Results"}
-          </span>
-        </div>
-        <div className="w-6" />
+        <span className="text-sm font-medium tracking-wide text-slate-500 uppercase">
+          {flowState === "PREPARING" && "Get Ready"}
+          {flowState === "INITIAL_DELAY" && "Get Ready"}
+          {flowState === "SILENCE_COUNTDOWN" && "Prepare for Silence"}
+          {flowState === "SILENCE_RECORDING" && "Recording Silence"}
+          {flowState === "RECORDING" && "Recording"}
+          {flowState === "ANALYZING" && "Analyzing"}
+          {flowState === "RESULT" && isSuccess && "Done"}
+          {flowState === "RESULT" && !isSuccess && "Error"}
+        </span>
+        <div className="w-8" />
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 flex flex-col items-center justify-center relative z-20 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+      <main className="flex-1 flex flex-col items-center justify-center relative z-20 min-h-0 overflow-y-auto">
 
         <AnimatePresence mode="wait">
 
@@ -414,61 +412,98 @@ export function RecordingFlow() {
               initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center text-center space-y-6 sm:space-y-8 w-full max-w-md mx-auto"
             >
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.7)", backdropFilter: "blur(12px)" }}>
-                <Mic className="w-8 h-8 sm:w-10 sm:h-10 text-purple-600" />
+              <div className="w-20 h-20 sm:w-24 sm:h-24 bg-violet-100 rounded-full flex items-center justify-center border border-violet-200">
+                <Mic className="w-8 h-8 sm:w-10 sm:h-10 text-violet-600" />
               </div>
               <div>
-                <h2 className="text-xl sm:text-2xl font-bold mb-2">
-                  {isDemoMode ? "Demo Voice Analysis" : "Daily Voice Check"}
-                </h2>
-                <p className="text-neutral-400 max-w-xs mx-auto text-sm leading-relaxed">
-                  {isDemoMode
-                    ? "This demo will simulate the prolonged vowel test using a pre-recorded sample audio file."
-                    : "Find a quiet place. First, we'll record 3 seconds of silence to calibrate, then you'll complete a voice task."
-                  }
+                <h2 className="text-xl sm:text-2xl font-bold mb-2">Daily Voice Check</h2>
+                <p className="text-slate-500 max-w-xs mx-auto text-sm leading-relaxed">
+                  Find a quiet place. First, we'll record 3 seconds of silence to calibrate, then you'll complete a voice task.
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-purple-200/50 p-4 w-full text-left flex items-start gap-3 sm:gap-4 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
-                <div className="bg-purple-100/80 p-2 rounded-xl text-purple-600 shrink-0 border border-purple-200/40">
+              <div className="bg-white border border-violet-100 rounded-2xl p-4 w-full text-left flex items-start gap-3 sm:gap-4 shadow-sm">
+                <div className="bg-violet-100 p-2 rounded-xl text-violet-600 shrink-0">
                   <Play className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-semibold text-white">Task: {currentPrompt?.type || "Loading..."}</h3>
-                  <p className="text-xs text-neutral-400 mt-1">{currentPrompt?.instruction || "Please wait while we set up your task."}</p>
+                  <h3 className="text-sm font-semibold text-slate-900">Task: {currentPrompt.type}</h3>
+                  <p className="text-xs text-slate-500 mt-1">{currentPrompt.instruction}</p>
                 </div>
               </div>
 
               <button
                 onClick={handleStart}
-                disabled={!currentPrompt}
-                className="w-full py-4 mt-4 sm:mt-8 bg-indigo-500 hover:bg-indigo-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-2xl font-bold text-base sm:text-lg shadow-[0_0_40px_-10px_rgba(99,102,241,0.5)] transition-all"
+                className="w-full py-4 mt-4 sm:mt-8 bg-violet-600 hover:bg-violet-700 text-white rounded-2xl font-bold text-base sm:text-lg shadow-lg shadow-violet-300/30 transition-all"
               >
                 I'm Ready
               </button>
             </motion.div>
           )}
 
+          {flowState === "INITIAL_DELAY" && (
+            <motion.div
+              key="initial-delay"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
+            >
+              <div className="text-[120px] font-black text-violet-600 drop-shadow-[0_0_30px_rgba(124,58,237,0.3)] tabular-nums">
+                {countdown}
+              </div>
+              <div className="bg-violet-50 border border-violet-200 rounded-2xl p-6 w-full">
+                <p className="text-slate-600 text-lg font-medium">
+                  Get ready to be quiet for 3 seconds
+                </p>
+              </div>
+            </motion.div>
+          )}
+
           {flowState === "SILENCE_COUNTDOWN" && (
             <motion.div
               key="silence-countdown"
-              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
               className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
             >
-              <div className="relative w-32 h-32 flex items-center justify-center">
-                <motion.div
-                  animate={{ scale: [1, 1.15, 1] }}
-                  transition={{ repeat: Infinity, duration: 1 }}
-                  className="absolute inset-0 rounded-full border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.6)" }}
-                />
-                <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse absolute top-2 right-2" />
-                <div className="text-[100px] font-black text-purple-600 drop-shadow-[0_0_30px_rgba(139,92,246,0.3)] tabular-nums leading-none">
-                  {silenceCountdown}
-                </div>
+              <div className="text-[120px] font-black text-amber-500 drop-shadow-[0_0_30px_rgba(245,158,11,0.3)] tabular-nums">
+                {silenceCountdown}
               </div>
-              <div className="rounded-2xl border border-purple-200/50 p-6 w-full shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
-                <p className="text-purple-700 text-lg font-medium">Preparing to record silence...</p>
-                <p className="text-purple-500/70 text-sm mt-1">Stay quiet for calibration</p>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 w-full">
+                <p className="text-amber-700 text-xl font-bold mb-2">Please be quiet!</p>
+                <p className="text-slate-500 text-sm">
+                  Recording {silenceCountdown} seconds of silence for calibration
+                </p>
+              </div>
+            </motion.div>
+          )}
+
+          {flowState === "SILENCE_RECORDING" && (
+            <motion.div
+              key="silence-recording"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col items-center text-center space-y-6 w-full max-w-md mx-auto"
+            >
+              <div className="w-32 h-32 bg-amber-50 rounded-full flex items-center justify-center border-4 border-amber-200 relative">
+                <motion.div
+                  animate={{ scale: [1, 1.1, 1] }}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                  className="absolute inset-0 bg-amber-100 rounded-full"
+                />
+                <Mic className="w-12 h-12 text-amber-500" />
+              </div>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 w-full">
+                <p className="text-amber-700 text-xl font-bold mb-2">Shh... Stay quiet</p>
+                <p className="text-slate-500 text-sm">
+                  Calibrating with silence: {recordingTime}/3 seconds
+                </p>
+                <p className="text-slate-400 text-xs mt-2">
+                  Your task will begin after this
+                </p>
               </div>
             </motion.div>
           )}
@@ -476,55 +511,61 @@ export function RecordingFlow() {
           {flowState === "RECORDING" && (
             <motion.div
               key="recording"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col items-center w-full max-w-lg mx-auto space-y-6 sm:space-y-8"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="flex flex-col items-center w-full space-y-6 sm:space-y-8"
             >
-              <div className="w-full rounded-2xl border border-purple-200/50 p-4 sm:p-5 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
-                  <span className="text-[11px] text-purple-400 uppercase tracking-[0.15em] font-semibold">Live Audio</span>
+              {/* Live Audio Waveform */}
+              <div className="w-full max-w-lg">
+                <div className="bg-white border border-violet-100 rounded-2xl p-4 sm:p-5 shadow-sm">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
+                    <span className="text-xs text-slate-500 uppercase tracking-wider font-medium">Live Audio</span>
+                  </div>
+                  <LiveWaveform analyser={analyserRef.current} isActive={flowState === "RECORDING"} />
                 </div>
-                <LiveWaveform analyser={analyserRef.current} isActive={flowState === "RECORDING"} />
               </div>
 
-              <div className="w-full rounded-2xl border border-purple-200/50 p-4 sm:p-5 shadow-sm backdrop-blur-md text-center space-y-2" style={{ background: "rgba(255,255,255,0.7)" }}>
-                <div className="text-4xl sm:text-5xl font-black text-purple-900 tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+              {/* Recording Timer */}
+              <div className="text-center space-y-2">
+                <div className="text-4xl sm:text-5xl font-black text-slate-900 tabular-nums">
                   {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
-                  <span className="text-2xl text-neutral-500"> / {currentPrompt ? `${Math.floor(currentPrompt.recordingDuration / 60)}:${(currentPrompt.recordingDuration % 60).toString().padStart(2, '0')}` : "0:00"}</span>
+                  <span className="text-2xl text-slate-400"> / {Math.floor(currentPrompt.recordingDuration / 60)}:{(currentPrompt.recordingDuration % 60).toString().padStart(2, '0')}</span>
                 </div>
-                <p className="text-sm text-neutral-400">Recording in progress</p>
-                <div className="w-full bg-neutral-800 rounded-full h-2 mt-3">
+                <p className="text-sm text-slate-500">Recording in progress</p>
+                <div className="w-full bg-violet-100 rounded-full h-2 mt-3">
                   <div
-                    className="bg-indigo-500 h-2 rounded-full transition-all duration-1000"
-                    style={{ width: currentPrompt ? `${(recordingTime / currentPrompt.recordingDuration) * 100}%` : '0%' }}
+                    className="bg-violet-600 h-2 rounded-full transition-all duration-1000"
+                    style={{ width: `${(recordingTime / currentPrompt.recordingDuration) * 100}%` }}
                   />
                 </div>
               </div>
 
               {/* Prompt Text */}
-              {currentPrompt && (
-                <div className="w-full bg-neutral-900 border border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-inner max-h-[40vh] overflow-y-auto">
-                  {currentPrompt.id === "reading_passage" || currentPrompt.id === "harvard_sentences" ? (
-                    <div className="text-base sm:text-lg font-medium leading-relaxed text-white text-left">
-                      {currentPrompt.text}
-                    </div>
-                  ) : (
-                    <motion.div
-                      animate={{ scale: [1, 1.05, 1] }}
-                      transition={{ repeat: Infinity, duration: 2 }}
-                      className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-indigo-400 text-center"
-                    >
-                      {currentPrompt.text}
-                    </motion.div>
-                  )}
-                </div>
-              )}
+              <div className="w-full bg-white border border-violet-100 rounded-3xl p-4 sm:p-6 shadow-sm max-h-[40vh] overflow-y-auto">
+                {currentPrompt.type === "Reading" ? (
+                  <div className="text-base sm:text-lg font-medium leading-relaxed text-slate-800 text-left">
+                    {currentPrompt.text}
+                  </div>
+                ) : (
+                  <motion.div
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ repeat: Infinity, duration: 2 }}
+                    className="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-violet-600 text-center"
+                  >
+                    {currentPrompt.text}
+                  </motion.div>
+                )}
+              </div>
 
+              {/* Stop Recording Button */}
               <button
                 onClick={handleStopRecording}
-                className="w-full py-4 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-rose-500/25 transition-all flex items-center justify-center gap-3"
+                className="w-full py-4 bg-rose-500 hover:bg-rose-600 text-white rounded-2xl font-bold text-lg shadow-lg shadow-rose-200/40 transition-all flex items-center justify-center gap-3"
               >
-                <Square className="w-5 h-5 fill-current" /> Stop Recording
+                <Square className="w-5 h-5 fill-current" />
+                Stop Recording
               </button>
             </motion.div>
           )}
@@ -532,145 +573,71 @@ export function RecordingFlow() {
           {flowState === "ANALYZING" && (
             <motion.div
               key="analyzing"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="flex flex-col items-center space-y-6"
             >
-              <div className="relative w-32 h-32 flex items-center justify-center rounded-full border border-purple-200/50 shadow-sm" style={{ background: "rgba(255,255,255,0.6)" }}>
-                <svg className="w-full h-full animate-spin text-purple-200" viewBox="0 0 100 100">
+              <div className="relative w-32 h-32 flex items-center justify-center">
+                <svg className="w-full h-full animate-spin text-violet-200" viewBox="0 0 100 100">
                   <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" />
-                  <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" strokeDasharray="283" strokeDashoffset="200" className="text-purple-600" strokeLinecap="round" />
+                  <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" strokeWidth="8" strokeDasharray="283" strokeDashoffset="200" className="text-violet-600" strokeLinecap="round" />
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <Activity className="w-8 h-8 text-purple-600 animate-pulse" />
+                  <Activity className="w-8 h-8 text-violet-600 animate-pulse" />
                 </div>
               </div>
-              <h2 className="text-xl font-bold text-purple-900" style={{ fontFamily: "var(--font-brand)" }}>Extracting Biomarkers</h2>
-              <p className="text-sm text-purple-500 text-center max-w-xs">Analyzing pitch, shimmer, jitter, and spectral flux against your baseline...</p>
+              <h2 className="text-xl font-bold">Extracting Biomarkers</h2>
+              <p className="text-sm text-slate-500 text-center max-w-xs">
+                Analyzing pitch, shimmer, jitter, and spectral flux against your baseline...
+              </p>
             </motion.div>
           )}
 
           {flowState === "RESULT" && (
             <motion.div
               key="result"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
               className="flex flex-col items-center space-y-6 sm:space-y-8 w-full max-w-md mx-auto"
             >
               {isSuccess ? (
                 <>
-                  <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center border-4 border-emerald-400/60 relative shadow-sm" style={{ background: "rgba(255,255,255,0.8)" }}>
-                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}>
+                  <div className="w-28 h-28 sm:w-32 sm:h-32 bg-emerald-50 rounded-full flex items-center justify-center border-4 border-emerald-400 relative">
+                    <motion.div
+                      initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}
+                    >
                       <CheckCircle2 className="w-12 h-12 sm:w-16 sm:h-16 text-emerald-500" />
                     </motion.div>
                   </div>
-                  <div className="text-center space-y-2 rounded-2xl border border-purple-200/50 p-6 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-emerald-700" style={{ fontFamily: "var(--font-brand)" }}>Quality Check Passed</h2>
-                    <p className="text-sm sm:text-base text-purple-500">Audio sample was clear and isolated.</p>
+                  <div className="text-center space-y-2">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Quality Check Passed</h2>
+                    <p className="text-sm sm:text-base text-slate-500">Audio sample was clear and isolated.</p>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center border-4 border-rose-400/60 relative shadow-sm" style={{ background: "rgba(255,255,255,0.8)" }}>
-                    <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}>
+                  <div className="w-28 h-28 sm:w-32 sm:h-32 bg-rose-50 rounded-full flex items-center justify-center border-4 border-rose-400 relative">
+                    <motion.div
+                      initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring", bounce: 0.5 }}
+                    >
                       <XCircle className="w-12 h-12 sm:w-16 sm:h-16 text-rose-500" />
                     </motion.div>
                   </div>
-                  <div className="text-center space-y-2 rounded-2xl border border-purple-200/50 p-6 shadow-sm backdrop-blur-md" style={{ background: "rgba(255,255,255,0.7)" }}>
-                    <h2 className="text-2xl sm:text-3xl font-bold text-rose-700" style={{ fontFamily: "var(--font-brand)" }}>Analysis Failed</h2>
-                    <p className="text-sm sm:text-base text-purple-500">{analysisError || "We couldn't isolate your voice clearly."}</p>
+                  <div className="text-center space-y-2">
+                    <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">Analysis Failed</h2>
+                    <p className="text-sm sm:text-base text-slate-500">
+                      {analysisError || "We couldn't isolate your voice clearly."}
+                    </p>
                   </div>
                 </>
               )}
 
               <button
                 onClick={isSuccess ? finishRecording : handleStart}
-                className={`w-full py-4 mt-4 text-white rounded-2xl font-bold text-base sm:text-lg transition-all shadow-lg ${isSuccess ? "bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/25" : "bg-rose-500 hover:bg-rose-600 shadow-rose-500/25"}`}
+                className={`w-full py-4 mt-4 text-white rounded-2xl font-bold text-base sm:text-lg transition-all ${isSuccess ? "bg-emerald-500 hover:bg-emerald-600 shadow-lg shadow-emerald-200/40" : "bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-200/40"}`}
               >
                 {isSuccess ? "View Results" : "Try Again"}
-              </button>
-            </motion.div>
-          )}
-
-          {flowState === "SHOW_DATA" && displayData && (
-            <motion.div
-              key="show-data"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="flex flex-col items-center space-y-6 w-full max-w-2xl mx-auto"
-            >
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl sm:text-3xl font-bold text-white">Your Voice Analysis</h2>
-                <p className="text-sm sm:text-base text-neutral-400">{displayData.message}</p>
-              </div>
-
-              {/* Biomarkers Grid */}
-              <div className="grid grid-cols-2 gap-4 w-full">
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                  <div className="text-neutral-400 text-xs uppercase tracking-wider mb-2">Pitch (F0)</div>
-                  <div className="text-2xl sm:text-3xl font-bold text-white">{displayData.pitch} Hz</div>
-                  <div className="text-xs text-neutral-500 mt-1">Fundamental frequency</div>
-                </div>
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                  <div className="text-neutral-400 text-xs uppercase tracking-wider mb-2">Jitter</div>
-                  <div className="text-2xl sm:text-3xl font-bold text-white">{displayData.jitter}%</div>
-                  <div className="text-xs text-neutral-500 mt-1">Pitch variation</div>
-                </div>
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                  <div className="text-neutral-400 text-xs uppercase tracking-wider mb-2">Shimmer</div>
-                  <div className="text-2xl sm:text-3xl font-bold text-white">{displayData.shimmer}%</div>
-                  <div className="text-xs text-neutral-500 mt-1">Amplitude variation</div>
-                </div>
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                  <div className="text-neutral-400 text-xs uppercase tracking-wider mb-2">HNR</div>
-                  <div className="text-2xl sm:text-3xl font-bold text-white">{displayData.harmonicRatio} dB</div>
-                  <div className="text-xs text-neutral-500 mt-1">Voice quality</div>
-                </div>
-              </div>
-
-              {/* Additional Metrics */}
-              <div className="grid grid-cols-1 gap-4 w-full">
-                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                  <div className="text-neutral-400 text-xs uppercase tracking-wider mb-2">Spectral Centroid</div>
-                  <div className="text-2xl sm:text-3xl font-bold text-white">{displayData.spectralCentroid} Hz</div>
-                  <div className="text-xs text-neutral-500 mt-1">Brightness of sound</div>
-                </div>
-
-                {/* Quality Metrics */}
-                {(displayData.snr || displayData.voicedDuration) && (
-                  <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-4 sm:p-6">
-                    <div className="text-neutral-400 text-xs uppercase tracking-wider mb-3">Recording Quality</div>
-                    <div className="grid grid-cols-2 gap-4">
-                      {displayData.snr && (
-                        <div>
-                          <div className="text-sm text-neutral-500">SNR</div>
-                          <div className="text-xl font-bold text-emerald-400">{displayData.snr.toFixed(1)} dB</div>
-                        </div>
-                      )}
-                      {displayData.voicedDuration && (
-                        <div>
-                          <div className="text-sm text-neutral-500">Voiced</div>
-                          <div className="text-xl font-bold text-emerald-400">{displayData.voicedDuration.toFixed(1)}s</div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Anomaly Indicator */}
-              {displayData.isAnomaly && (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 w-full">
-                  <p className="text-amber-200 text-sm text-center">
-                    We detected some variations in your voice. Consider consulting a healthcare professional if symptoms persist.
-                  </p>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <button
-                onClick={() => navigate("/")}
-                className="w-full py-4 bg-indigo-500 hover:bg-indigo-600 text-white rounded-2xl font-bold text-base sm:text-lg shadow-[0_0_40px_-10px_rgba(99,102,241,0.5)] transition-all"
-              >
-                Back to Home
               </button>
             </motion.div>
           )}

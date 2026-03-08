@@ -55,7 +55,7 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
             ctx.clearRect(0, 0, w, h);
 
             // Draw center line
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+            ctx.strokeStyle = "rgba(124, 58, 237, 0.08)";
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(0, h / 2);
@@ -66,8 +66,8 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
             const step = Math.max(1, Math.floor(totalSamples / w));
 
             // Draw main waveform
-            ctx.lineWidth = 2.2;
-            ctx.strokeStyle = "#818cf8"; // indigo-400
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = "#7c3aed"; // violet-600
             ctx.beginPath();
 
             for (let x = 0; x < w; x++) {
@@ -93,7 +93,7 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
             ctx.stroke();
 
             // Waveform fill
-            ctx.fillStyle = "rgba(129, 140, 248, 0.14)";
+            ctx.fillStyle = "rgba(124, 58, 237, 0.08)";
             ctx.beginPath();
             for (let x = 0; x < w; x++) {
                 const sampleIndex = Math.floor((x / w) * totalSamples);
@@ -188,7 +188,7 @@ export function RecordedWaveform({ audioData, jitter = 1.2, shimmer = 3.4 }: Rec
                 className="w-full h-28 sm:h-36 rounded-xl"
                 style={{ imageRendering: "auto" }}
             />
-            <div className="flex items-center gap-4 text-xs text-neutral-500">
+            <div className="flex items-center gap-4 text-xs text-slate-500">
                 <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
                     Jitter ({jitter}%)
