@@ -619,7 +619,7 @@ export function RecordingFlow() {
               </div>
               <h2 className="text-xl font-bold">Extracting Biomarkers</h2>
               <p className="text-sm text-slate-500 text-center max-w-xs">
-                Analyzing pitch, shimmer, jitter, and spectral flux against your baseline...
+                Analyzing pitch, shimmer, jitter, and harmonics against your baseline...
               </p>
             </motion.div>
           )}

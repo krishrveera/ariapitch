@@ -130,22 +130,9 @@ export function Home() {
                     </div>
                   </div>
                   <div>
-                    <h3 className="text-xs text-slate-500 mb-1">Jitter</h3>
-                    <div className="text-base sm:text-lg font-semibold text-amber-600">{latestEntry ? latestEntry.jitter : '—'}</div>
-                    <div className="h-16 sm:h-20 mt-2">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={userData.history} margin={{ top: 5, left: 5, right: 5, bottom: 0 }}>
-                          <YAxis domain={['dataMin - 0.005', 'dataMax + 0.005']} stroke="#a1a1aa" tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false} width={40} tickFormatter={(v: number) => v.toFixed(3)} />
-                          <Line type="monotone" dataKey="jitter" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                          <ReferenceLine y={0.01} stroke="#d4d4d8" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Healthy", position: "right", fill: "#a1a1aa", fontSize: 9 }} />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                  <div className="col-span-2">
-                    <h3 className="text-xs text-slate-500 mb-1 text-center">Harmonic-to-Noise Ratio</h3>
-                    <div className="text-base sm:text-lg font-semibold text-purple-600 text-center">{latestEntry?.harmonicRatio ? `${latestEntry.harmonicRatio} dB` : '—'}</div>
-                    <div className="mt-2 flex items-center gap-2 max-w-xs mx-auto">
+                    <h3 className="text-xs text-slate-500 mb-1">Harmonic-to-Noise Ratio</h3>
+                    <div className="text-base sm:text-lg font-semibold text-purple-600">{latestEntry?.harmonicRatio ? `${latestEntry.harmonicRatio} dB` : '—'}</div>
+                    <div className="mt-2 flex items-center gap-2">
                       <div className="flex-1 h-2 bg-purple-100 rounded-full overflow-hidden">
                         <div className="h-full bg-purple-500 rounded-full" style={{ width: `${latestEntry?.harmonicRatio ? Math.min((latestEntry.harmonicRatio / 25) * 100, 100) : 0}%` }} />
                       </div>
@@ -195,7 +182,7 @@ export function Home() {
                       <div className={`mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs ${c.meta}`}>
                         <span>Pitch: {entry.pitch}Hz</span>
                         <span>Shimmer: {entry.shimmer} dB</span>
-                        <span>Jitter: {entry.jitter}</span>
+                        <span>HNR: {entry.harmonicRatio} dB</span>
                       </div>
                     </div>
                   );
