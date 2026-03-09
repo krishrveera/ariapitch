@@ -48,3 +48,4 @@ colab/
 *.m4a
 *.wav
 !server/samples/**
+.claude/
